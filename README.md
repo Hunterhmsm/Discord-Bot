@@ -17,3 +17,6 @@ Features these commands so far,
         /stock [name] - Views the entire stock market, if a name is included view the history of that stock.
         /roulette [amount] [bet] - Plays a game of roulette with your amount and bet.
         /leaderboard [type] - Lets you view either the networth, time in vc, or time in vc alone leaderboard.
+        /lotteryticket [numbers] - Buys a lottery ticket using the numbers provided.
+        /lotterydraw - Forces a lottery draw, restricted to certain roles.
+        /lotterytotal - Views the current lottery jackpot.

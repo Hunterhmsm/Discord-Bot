@@ -9,6 +9,7 @@ import asyncio
 from typing import Optional
 import datetime
 import pytz
+from zoneinfo import ZoneInfo
 
 
 #keys are user IDs (as strings), values are dicts with session data. tracks active VCs
@@ -31,7 +32,10 @@ DATA_FILE = "data.json"
 ALLOWED_ROLES = ["him"]
 STOCK_FILE = "stocks.json"
 STOCK_HISTORY_FILE = "stock_history.json"
-UPDATE_INTERVAL_MINUTES = 20 #changes stock interval
+UPDATE_INTERVAL_MINUTES = 20 #changes stock interva
+LOTTERY_FILE = "lottery.json"
+AFK_CHANNEL_ID = 574668552557297666
+
 
 bot = commands.Bot(command_prefix="!", intents=intents)
 
@@ -41,6 +45,25 @@ DIAMONDS = chr(9830)  # ♦
 SPADES   = chr(9824)  # ♠
 CLUBS    = chr(9827)  # ♣
 BACKSIDE = "backside"
+
+def update_active_vc_sessions_on_startup():
+    now = datetime.datetime.now()
+    guild = bot.get_guild(GUILD_ID)
+    if guild:
+        for channel in guild.voice_channels:
+            for member in channel.members:
+                if not member.bot:
+                    uid = str(member.id)
+                    if uid not in active_vc_sessions:
+                        non_bots = [m for m in channel.members if not m.bot]
+                        active_vc_sessions[uid] = {
+                            "join_time": now,
+                            "channel_id": channel.id,
+                            "last_alone_update": now if len(non_bots) == 1 else None,
+                            "alone_accumulated": datetime.timedelta(0),
+                            "afk": (channel.id == AFK_CHANNEL_ID)
+                        }
+                        print(f"Added {member.display_name} (ID: {uid}) to active VC sessions.")
 
 def load_stocks():
     try:
@@ -110,58 +133,61 @@ def update_stock_prices():
     print("Stock prices updated:", data)
     return changes
 
-
 @bot.tree.command(
-    name="buy",
-    description="Invest a specified amount of Beaned Bucks to buy shares (fractional shares allowed).",
+    name="stockbuy",
+    description="Invest a specified amount of Beaned Bucks to buy shares. Use 'all' to invest your entire balance.",
     guild=discord.Object(id=GUILD_ID)
 )
 @app_commands.describe(
     stock="The stock symbol to buy (e.g. ACME)",
-    amount="The amount of Beaned Bucks you want to invest"
+    amount="The amount of Beaned Bucks you want to invest (or 'all')"
 )
-async def buy(interaction: discord.Interaction, stock: str, amount: float):
-    if amount <= 0:
-        await interaction.response.send_message("Investment amount must be greater than 0.", ephemeral=True)
-        return
-
-    stocks_data = load_stocks()  
+async def buy(interaction: discord.Interaction, stock: str, amount: str):
+    stocks_data = load_stocks()
     stock = stock.upper()
     if stock not in stocks_data:
         await interaction.response.send_message("Invalid stock symbol.", ephemeral=True)
         return
 
     price = stocks_data[stock]
-    shares = amount / price  
-
     data = load_data()
     user_id = str(interaction.user.id)
-    #initialize portfolio and tracking fields if they don't exist.
     user_record = data.get(user_id, {"balance": 0, "portfolio": {}, "total_spent": 0, "total_earned": 0})
-    current_balance = user_record.get("balance", 0)
+    current_balance = float(user_record.get("balance", 0))
 
-    if current_balance < amount:
-        await interaction.response.send_message(
-            f"You do not have enough Beaned Bucks to invest {amount}.", ephemeral=True
-        )
+    #determine investment amount.
+    if amount.lower() == "all":
+        invest_amount = current_balance
+    else:
+        try:
+            invest_amount = float(amount)
+        except ValueError:
+            await interaction.response.send_message("Invalid investment amount.", ephemeral=True)
+            return
+
+    if invest_amount <= 0:
+        await interaction.response.send_message("Investment amount must be greater than 0.", ephemeral=True)
+        return
+    if invest_amount > current_balance:
+        await interaction.response.send_message(f"You do not have enough Beaned Bucks to invest {invest_amount}.", ephemeral=True)
         return
 
-    user_record["balance"] = current_balance - amount
+    shares = invest_amount / price
+    user_record["balance"] = current_balance - invest_amount
     portfolio = user_record.get("portfolio", {})
     portfolio[stock] = portfolio.get(stock, 0) + shares
     user_record["portfolio"] = portfolio
-
-    #update total spent
-    user_record["total_spent"] = user_record.get("total_spent", 0) + amount
+    user_record["total_spent"] = user_record.get("total_spent", 0) + invest_amount
 
     data[user_id] = user_record
     save_data(data)
 
     await interaction.response.send_message(
-        f"Successfully invested {amount} Beaned Bucks in {stock} at {price} per share.\n"
+        f"Successfully invested {invest_amount} Beaned Bucks in {stock} at {price} per share.\n"
         f"You now own {portfolio[stock]} shares of {stock}.\n"
         f"Your new balance is {user_record['balance']} Beaned Bucks."
     )
+
 
 @bot.tree.command(
     name="portfolio",
@@ -214,7 +240,7 @@ async def portfolio(interaction: discord.Interaction, user: Optional[discord.Mem
     await interaction.response.send_message(embed=embed)
 
 @bot.tree.command(
-    name="sell",
+    name="stocksell",
     description="Sell shares of a stock (fractional shares allowed) to receive Beaned Bucks.",
     guild=discord.Object(id=GUILD_ID)
 )
@@ -504,7 +530,7 @@ async def stock_market_loop():
         embed.add_field(name=stock, value=field_value, inline=True)
     
     #find the channel named "stocks" and send the embed.
-    channel = discord.utils.get(bot.get_all_channels(), name="stocks")
+    channel = discord.utils.get(bot.get_all_channels(), name="bot-output")
     if channel is not None:
         try:
             await channel.send(embed=embed)
@@ -560,24 +586,44 @@ async def stocks(interaction: discord.Interaction, stock: Optional[str] = None):
     guild=discord.Object(id=GUILD_ID)
 )
 async def help_command(interaction: discord.Interaction):
-    help_text = (
-        "**Beaned Bot Help**\n\n"
-        "**/blackjack [bet]** - Play a round of Blackjack using your Beaned Bucks. Place a bet and then choose to Hit, Stand, or Double Down.\n\n"
-        "**/work** - Work to earn a random amount between 1 and 250 Beaned Bucks (usable every 10 minutes).\n\n"
-        "**/daily** - Claim your daily reward of 500-5000 Beaned bucks every 24 hours.\n\n"
-        "**/dailyboost** - Claim your daily reward of 5000-10000 Beaned bucks every 24 hours. (server boosters only).\n\n"
-        "**/balance [user]** - Check your Beaned Bucks balance. If no user is provided, it defaults to your own balance.\n\n"
-        "**/wheel [target]** - Timeout a user randomly for various durations if you have enough Beaned Bucks or an allowed role.\n\n"
-        "**/joinnotification** - Join the notif notifications channel.\n\n"
-        "**/leavenotification** - Leave the notif notifications channel\n\n"
-        "**/portfolio** - Checks your stock portfolio\n\n"
-        "**/stock [stock name]** - Checks the entire stock market, if stock name is included check that stocks history\n\n"
-        "**/buystock [stock] [price]** - Buys an amount of stock equal to your price.\n\n"
-        "**/sellstock [stock] [price]** - Sells an amount of stock equal to your price.\n\n"
-        "**/roulette [amount] [bet]** - Plays a game of roulette with your amount and bet.\n\n"
-        "**/leaderboard [type]** - Lets you view either the networth, time in vc, or time in vc alone leaderboard."
+    embed = discord.Embed(
+        title="Beaned Bot Help",
+        color=discord.Color.blue(),
+        description="Below are the commands available, grouped by category."
     )
-    await interaction.response.send_message(help_text, ephemeral=True)
+    
+    general = (
+        "**/balance [user]** - Check your Beaned Bucks balance (defaults to your own).\n"
+        "**/joinnotification** - Join the notif notifications channel.\n"
+        "**/leavenotification** - Leave the notif notifications channel."
+    )
+    
+    gambling = (
+        "**/blackjack [bet]** - Play a round of Blackjack using your Beaned Bucks.\n"
+        "**/roulette [amount] [bet]** - Play a game of roulette with your bet.\n"
+        "**/wheel [target]** - Timeout a user randomly if you have enough Beaned Bucks or the allowed role."
+    )
+    
+    stocks = (
+        "**/portfolio** - Check your stock portfolio and profit (invested vs. earned).\n"
+        "**/stock [stock name]** - View current stock prices or a specific stock's history.\n"
+        "**/buystock [stock] [price]** - Buy stock at your specified price.\n"
+        "**/sellstock [stock] [price]** - Sell stock at your specified price."
+    )
+    
+    lottery = (
+        "**/lotteryticket [numbers]** - Buy a lottery ticket for 5,000 Beaned Bucks; choose 5 unique numbers (1-60).\n"
+        "**/lotterydraw** - Force a lottery draw (restricted to lottery admins).\n"
+        "**/lotterytotal** - View the current lottery jackpot."
+    )
+    
+    embed.add_field(name="General", value=general, inline=False)
+    embed.add_field(name="Gambling", value=gambling, inline=False)
+    embed.add_field(name="Stocks", value=stocks, inline=False)
+    embed.add_field(name="Lottery", value=lottery, inline=False)
+    
+    await interaction.response.send_message(embed=embed, ephemeral=True)
+
 
 @bot.tree.command(
     name="work",
@@ -629,14 +675,22 @@ def is_blackjack(hand):
     guild=discord.Object(id=GUILD_ID)
 )
 @app_commands.describe(bet="The amount of Beaned Bucks you want to bet (can be non-integer)")
-async def blackjack(interaction: discord.Interaction, bet: float):
+async def blackjack(interaction: discord.Interaction, bet: str):
     print(f"[Blackjack] Invoked by {interaction.user} with bet {bet}")
     data = load_data()
     user_id = str(interaction.user.id)
     user_record = data.get(user_id, {"balance": 0})
     balance = float(user_record.get("balance", 0))
-    print(f"[Blackjack] User record before game: {user_record}")
-    
+
+    if bet.lower() == "all":
+        bet = balance
+    else:
+        try:
+            bet = float(bet)
+        except ValueError:
+            await interaction.response.send_message("Invalid bet amount.", ephemeral=True)
+            return
+        
     if bet <= 0:
         await interaction.response.send_message("Bet must be greater than 0.", ephemeral=True)
         return
@@ -768,11 +822,11 @@ async def wheel(interaction: discord.Interaction, target: discord.Member):
     user_id = str(invoker.id)
     user_balance = data.get(user_id, {}).get("balance", 0)
     if not has_allowed_role:
-        if user_balance < 50000:
+        if user_balance < 25000:
             await interaction.response.send_message("You do not have permission to use this command. You must either have one of the allowed roles or at least 10,000 Beaned Bucks.", ephemeral=True)
             return
         else:
-            data[user_id]["balance"] = user_balance - 50000
+            data[user_id]["balance"] = user_balance - 25000
             save_data(data)
     options = [
         (60, "60 seconds"),
@@ -817,10 +871,12 @@ async def dailyboost(interaction: discord.Interaction):
         last_boost = datetime.datetime.fromisoformat(last_boost_str)
         if now - last_boost < datetime.timedelta(days=1):
             remaining = datetime.timedelta(days=1) - (now - last_boost)
-            minutes = remaining.seconds // 60
-            seconds = remaining.seconds % 60
+            # Calculate the remaining hours, minutes, and seconds
+            remaining_hours = remaining.seconds // 3600  # Get the number of whole hours
+            remaining_minutes = (remaining.seconds % 3600) // 60  # Get the remaining minutes after hours are accounted for
+            remaining_seconds = remaining.seconds % 60  # Get the remaining seconds after minutes are accounted for
             await interaction.response.send_message(
-                f"You have already claimed your daily booster reward. Try again in {minutes} minutes and {seconds} seconds.",
+                f"You have already claimed your daily booster reward. Try again in {remaining_hours} hours, {remaining_minutes} minutes and {remaining_seconds} seconds.",
                 ephemeral=True
             )
             return
@@ -882,12 +938,10 @@ async def on_voice_state_update(member, before, after):
     now = datetime.datetime.now()
     uid = str(member.id)
 
-    # Helper: get non-bot members in a channel.
     def non_bot_members(channel):
         return [m for m in channel.members if not m.bot]
 
     # -- Notification for target user --
-    # If this is the target user, send the notif message when they join a VC.
     if member.id == TARGET_USER_ID:
         if before.channel is None and after.channel is not None:
             notif_channel = discord.utils.get(member.guild.text_channels, name="notif")
@@ -900,18 +954,22 @@ async def on_voice_state_update(member, before, after):
                 else:
                     await notif_channel.send(f"{role.mention} Alert: {member.mention} has joined a voice channel!")
 
-    # -- Voice Session Tracking for ALL Users --
+    #determine if the channel is the AFK channel.
+    def is_afk(channel):
+        return channel and channel.id == AFK_CHANNEL_ID
 
     #if a user joins a voice channel:
     if before.channel is None and after.channel is not None:
         channel = after.channel
         members = non_bot_members(channel)
         alone = (len(members) == 1)
+        #mark session as AFK if channel is the AFK channel.
         active_vc_sessions[uid] = {
-            "join_time": now,                   #when they joined
-            "channel_id": channel.id,           #the channel they joined
-            "last_alone_update": now if alone else None,  #when they became alone
-            "alone_accumulated": datetime.timedelta(0)    #total alone time accumulated so far
+            "join_time": now,
+            "channel_id": channel.id,
+            "last_alone_update": now if alone else None,
+            "alone_accumulated": datetime.timedelta(0),
+            "afk": is_afk(channel)
         }
     #if a user leaves a voice channel:
     elif before.channel is not None and after.channel is None:
@@ -922,14 +980,19 @@ async def on_voice_state_update(member, before, after):
             if session["last_alone_update"]:
                 alone_time += now - session["last_alone_update"]
             data = load_data()
-            record = data.get(uid, {"vc_time": 0, "vc_timealone": 0})
-            record["vc_time"] = record.get("vc_time", 0) + session_duration.total_seconds()
-            record["vc_timealone"] = record.get("vc_timealone", 0) + alone_time.total_seconds()
+            #if session was AFK, update "vc_afk"; else update normal VC times.
+            if session.get("afk"):
+                record = data.get(uid, {"vc_afk": 0})
+                record["vc_afk"] = record.get("vc_afk", 0) + session_duration.total_seconds()
+            else:
+                record = data.get(uid, {"vc_time": 0, "vc_timealone": 0})
+                record["vc_time"] = record.get("vc_time", 0) + session_duration.total_seconds()
+                record["vc_timealone"] = record.get("vc_timealone", 0) + alone_time.total_seconds()
             data[uid] = record
             save_data(data)
-    #if a user switches voice channels
+    #if a user switches voice channels:
     elif before.channel is not None and after.channel is not None:
-        #end the old session
+        #end the old session.
         session = active_vc_sessions.pop(uid, None)
         if session:
             session_duration = now - session["join_time"]
@@ -937,12 +1000,17 @@ async def on_voice_state_update(member, before, after):
             if session["last_alone_update"]:
                 alone_time += now - session["last_alone_update"]
             data = load_data()
-            record = data.get(uid, {"vc_time": 0, "vc_timealone": 0})
-            record["vc_time"] = record.get("vc_time", 0) + session_duration.total_seconds()
-            record["vc_timealone"] = record.get("vc_timealone", 0) + alone_time.total_seconds()
+            #update the appropriate field based on whether it was AFK.
+            if session.get("afk"):
+                record = data.get(uid, {"vc_afk": 0})
+                record["vc_afk"] = record.get("vc_afk", 0) + session_duration.total_seconds()
+            else:
+                record = data.get(uid, {"vc_time": 0, "vc_timealone": 0})
+                record["vc_time"] = record.get("vc_time", 0) + session_duration.total_seconds()
+                record["vc_timealone"] = record.get("vc_timealone", 0) + alone_time.total_seconds()
             data[uid] = record
             save_data(data)
-        #start a new session in the new channel
+        #start a new session for the new channel.
         channel = after.channel
         members = non_bot_members(channel)
         alone = (len(members) == 1)
@@ -950,10 +1018,11 @@ async def on_voice_state_update(member, before, after):
             "join_time": now,
             "channel_id": channel.id,
             "last_alone_update": now if alone else None,
-            "alone_accumulated": datetime.timedelta(0)
+            "alone_accumulated": datetime.timedelta(0),
+            "afk": is_afk(channel)
         }
 
-    #additionally update alone status for users in both the old and new channels
+    #additionally update alone status for users in both the before and after channels.
     for channel in [before.channel, after.channel]:
         if channel is None:
             continue
@@ -961,16 +1030,15 @@ async def on_voice_state_update(member, before, after):
         for m in members:
             s = active_vc_sessions.get(str(m.id))
             if s and s["channel_id"] == channel.id:
-                #if only one member is in the channel, mark as alone.
                 if len(members) == 1:
                     if s["last_alone_update"] is None:
                         s["last_alone_update"] = now
                 else:
-                    #if more than one member and they were marked as alone, accumulate the alone time.
                     if s["last_alone_update"]:
                         delta = now - s["last_alone_update"]
                         s["alone_accumulated"] += delta
                         s["last_alone_update"] = None
+
 
 @bot.tree.command(
     name="balance", 
@@ -1030,16 +1098,24 @@ async def leavenotification(interaction: discord.Interaction):
     bet="The amount of Beaned Bucks to bet",
     choice="Your bet: a number (0-36) or one of: odd, even, red, black, 1st12, 2nd12, 3rd12"
 )
-async def roulette(interaction: discord.Interaction, bet: float, choice: str):
+async def roulette(interaction: discord.Interaction, bet: str, choice: str):
     #validate bet amount.
-    if bet <= 0:
-        await interaction.response.send_message("Bet must be greater than 0.", ephemeral=True)
-        return
-
     data = load_data()
     user_id = str(interaction.user.id)
     user_record = data.get(user_id, {"balance": 0})
-    current_balance = user_record.get("balance", 0)
+    current_balance = float(user_record.get("balance", 0))
+    if bet.lower() == "all":
+        bet = current_balance
+    else:
+        try:
+            bet = float(bet)
+        except ValueError:
+            await interaction.response.send_message("Invalid bet amount.", ephemeral=True)
+            return
+        
+    if bet <= 0:
+        await interaction.response.send_message("Bet must be greater than 0.", ephemeral=True)
+        return
     if bet > current_balance:
         await interaction.response.send_message("You do not have enough Beaned Bucks for that bet.", ephemeral=True)
         return
@@ -1131,31 +1207,28 @@ async def roulette(interaction: discord.Interaction, bet: float, choice: str):
 #leaderboard command
 @bot.tree.command(
     name="leaderboard",
-    description="View the leaderboard. Categories: networth, time, or timealone.",
+    description="View the leaderboard. Categories: networth, time, timealone, or timeafk.",
     guild=discord.Object(id=GUILD_ID)
 )
-@app_commands.describe(category="Choose a category: networth, time, or timealone")
+@app_commands.describe(category="Choose a category: networth, time, timealone, or timeafk")
 async def leaderboard(interaction: discord.Interaction, category: str):
     category = category.lower()
-    data = load_data() 
+    data = load_data()
     leaderboard_list = []
 
     if category == "networth":
-        stock_prices = load_stocks() 
+        stock_prices = load_stocks()
         for user_id, record in data.items():
             balance = record.get("balance", 0)
             portfolio = record.get("portfolio", {})
-            portfolio_value = 0
-            for stock, shares in portfolio.items():
-                price = stock_prices.get(stock, 0)
-                portfolio_value += price * shares
+            portfolio_value = sum(stock_prices.get(stock, 0) * shares for stock, shares in portfolio.items())
             networth = balance + portfolio_value
             leaderboard_list.append((user_id, networth))
         leaderboard_list.sort(key=lambda x: x[1], reverse=True)
         title = "Net Worth Leaderboard"
     elif category == "time":
         for user_id, record in data.items():
-            vc_time = record.get("vc_time", 0)  #total time in vc
+            vc_time = record.get("vc_time", 0)
             leaderboard_list.append((user_id, vc_time))
         leaderboard_list.sort(key=lambda x: x[1], reverse=True)
         title = "Voice Channel Time Leaderboard"
@@ -1165,12 +1238,17 @@ async def leaderboard(interaction: discord.Interaction, category: str):
             leaderboard_list.append((user_id, vc_timealone))
         leaderboard_list.sort(key=lambda x: x[1], reverse=True)
         title = "Voice Channel Alone Time Leaderboard"
+    elif category == "timeafk":
+        for user_id, record in data.items():
+            vc_afk = record.get("vc_afk", 0)
+            leaderboard_list.append((user_id, vc_afk))
+        leaderboard_list.sort(key=lambda x: x[1], reverse=True)
+        title = "AFK Time Leaderboard"
     else:
-        await interaction.response.send_message("Invalid category. Please choose networth, time, or timealone.", ephemeral=True)
+        await interaction.response.send_message("Invalid category. Please choose networth, time, timealone, or timeafk.", ephemeral=True)
         return
 
     embed = discord.Embed(title=title, color=discord.Color.gold())
-    #display the top 10 entries
     count = 0
     for user_id, value in leaderboard_list[:10]:
         count += 1
@@ -1179,7 +1257,6 @@ async def leaderboard(interaction: discord.Interaction, category: str):
         if category == "networth":
             display_value = f"{value:.2f} Beaned Bucks"
         else:
-            #convert time
             hrs = value // 3600
             mins = (value % 3600) // 60
             secs = value % 60
@@ -1187,6 +1264,236 @@ async def leaderboard(interaction: discord.Interaction, category: str):
         embed.add_field(name=f"{count}. {name}", value=display_value, inline=False)
     await interaction.response.send_message(embed=embed)
 
+
+@bot.tree.command(
+    name="exit",
+    description="Shut down the bot and update VC trackers. (Restricted to users with the 'him' role.)",
+    guild=discord.Object(id=GUILD_ID)
+)
+async def exit(interaction: discord.Interaction):
+    #check if the invoking user has the "him" role (case-insensitive).
+    if not any(role.name.lower() == "him" for role in interaction.user.roles):
+        await interaction.response.send_message("You do not have permission to use this command.", ephemeral=True)
+        return
+
+    now = datetime.datetime.now()
+    data = load_data()
+    #process all active VC sessions.
+    for uid, session in list(active_vc_sessions.items()):
+        session_duration = now - session["join_time"]
+        alone_time = session["alone_accumulated"]
+        if session["last_alone_update"]:
+            alone_time += now - session["last_alone_update"]
+        record = data.get(uid, {"vc_time": 0, "vc_timealone": 0})
+        record["vc_time"] = record.get("vc_time", 0) + session_duration.total_seconds()
+        record["vc_timealone"] = record.get("vc_timealone", 0) + alone_time.total_seconds()
+        data[uid] = record
+        #remove this session from the active sessions.
+        del active_vc_sessions[uid]
+    save_data(data)
+    await interaction.response.send_message("Shutting down the bot and updating VC trackers...", ephemeral=True)
+    await bot.close()
+
+# --- Lottery Functions ---
+
+def load_lottery():
+    try:
+        with open(LOTTERY_FILE, "r") as f:
+            data = json.load(f)
+            #ensure necessary keys exist cause this broke everything
+            if "Jackpot" not in data:
+                data["Jackpot"] = 100000
+            if "Tickets" not in data:
+                data["Tickets"] = []
+            return data
+    except (FileNotFoundError, json.JSONDecodeError):
+        default_data = {"Jackpot": 100000, "Tickets": []}
+        save_lottery(default_data)
+        return default_data
+
+def save_lottery(data):
+    with open(LOTTERY_FILE, "w") as f:
+        json.dump(data, f, indent=4)
+
+def lottery_draw():
+    lottery_data = load_lottery()
+    jackpot = lottery_data.get("Jackpot", 100000)
+    tickets = lottery_data.get("Tickets", [])
+    #draw 5 unique numbers from 1 to 60.
+    drawn_numbers = random.sample(range(1, 61), 5)
+    drawn_set = set(drawn_numbers)
+    print(f"[Lottery] Drawn Numbers: {drawn_numbers}")
+
+    #for each ticket count how many numbers match and assign a raw multiplier
+    #mapping: 1 match = 0.20, 2 matches = 0.40, 3 matches = 0.60, 4 matches = 0.80, 5 matches = 1.00.
+    for ticket in tickets:
+        chosen = set(ticket.get("numbers", []))
+        if len(chosen) != 5:
+            ticket["raw_multiplier"] = 0
+            continue
+        matches = len(chosen.intersection(drawn_set))
+        if matches == 1:
+            ticket["raw_multiplier"] = 0.20
+        elif matches == 2:
+            ticket["raw_multiplier"] = 0.40
+        elif matches == 3:
+            ticket["raw_multiplier"] = 0.60
+        elif matches == 4:
+            ticket["raw_multiplier"] = 0.80
+        elif matches == 5:
+            ticket["raw_multiplier"] = 1.00
+        else:
+            ticket["raw_multiplier"] = 0
+
+    #filter winning tickets (raw_multiplier > 0) and sum their multipliers. (nerd stuff)
+    winning_tickets = [t for t in tickets if t["raw_multiplier"] > 0]
+    total_raw = sum(t["raw_multiplier"] for t in winning_tickets)
+
+    payouts = {}
+    if total_raw > 0:
+        for ticket in winning_tickets:
+            payout_fraction = ticket["raw_multiplier"] / total_raw
+            payout = jackpot * payout_fraction
+            uid = ticket["user_id"]
+            payouts[uid] = payouts.get(uid, 0) + payout
+
+    total_payout = sum(payouts.values())
+    new_jackpot = jackpot - total_payout + 25000
+
+    lottery_data["Jackpot"] = new_jackpot
+    lottery_data["Tickets"] = []
+    save_lottery(lottery_data)
+
+    return drawn_numbers, payouts  
+
+@bot.tree.command(
+    name="lotteryticket",
+    description="Buy a lottery ticket for 5,000 Beaned Bucks. Choose 5 unique numbers from 1 to 60.",
+    guild=discord.Object(id=GUILD_ID)
+)
+@app_commands.describe(
+    numbers="Enter 5 unique numbers between 1 and 60 separated by spaces (e.g., '5 12 23 34 45')"
+)
+async def lotteryticket(interaction: discord.Interaction, numbers: str):
+    try:
+        chosen_numbers = [int(n) for n in numbers.split()]
+    except ValueError:
+        await interaction.response.send_message("Invalid numbers. Please enter 5 numbers separated by spaces.", ephemeral=True)
+        return
+
+    if len(chosen_numbers) != 5 or len(set(chosen_numbers)) != 5 or any(n < 1 or n > 60 for n in chosen_numbers):
+        await interaction.response.send_message("You must provide 5 unique numbers between 1 and 60.", ephemeral=True)
+        return
+
+    #deduct ticket price from user's balance.
+    user_data = load_data()
+    user_id = str(interaction.user.id)
+    user_record = user_data.get(user_id, {"balance": 0})
+    if user_record.get("balance", 0) < 5000:
+        await interaction.response.send_message("You do not have enough Beaned Bucks to buy a lottery ticket.", ephemeral=True)
+        return
+
+    user_record["balance"] -= 5000
+    user_data[user_id] = user_record
+    save_data(user_data)
+
+    #update the lottery jackpot by adding 5,000.
+    lottery_data = load_lottery()
+    lottery_data["Jackpot"] = lottery_data.get("Jackpot", 100000) + 5000
+    #add the ticket to the lottery.
+    ticket = {"user_id": user_id, "numbers": sorted(chosen_numbers)}
+    lottery_data["Tickets"].append(ticket)
+    save_lottery(lottery_data)
+
+    await interaction.response.send_message(f"Ticket purchased with numbers: {sorted(chosen_numbers)}. 5000 Beaned Bucks deducted.", ephemeral=False)
+
+@bot.tree.command(
+    name="lotterytotal",
+    description="View the current lottery jackpot.",
+    guild=discord.Object(id=GUILD_ID)
+)
+async def lotterytotal(interaction: discord.Interaction):
+    lottery_data = load_lottery()
+    jackpot = lottery_data.get("Jackpot", 100000)
+    await interaction.response.send_message(f"The current lottery jackpot is {jackpot} Beaned Bucks.", ephemeral=False)
+@bot.tree.command(
+    name="lotterydraw",
+    description="Perform the lottery draw. (Restricted to lottery admins.)",
+    guild=discord.Object(id=GUILD_ID)
+)
+
+async def lotterydraw(interaction: discord.Interaction):
+    #check permission
+    if not any(role.name.lower() == ALLOWED_ROLES for role in interaction.user.roles):
+        await interaction.response.send_message("You do not have permission to run the lottery draw.", ephemeral=True)
+        return
+
+    drawn_numbers, payouts = lottery_draw()
+    #update winners Beaned Bucks in user data
+    user_data = load_data()
+    winners_msg = ""
+    if payouts:
+        for uid, amount in payouts.items():
+            record = user_data.get(uid, {"balance": 0})
+            record["balance"] = record.get("balance", 0) + amount
+            user_data[uid] = record
+            member = interaction.guild.get_member(int(uid))
+            name = member.display_name if member else f"User {uid}"
+            winners_msg += f"{name} wins {amount:.2f} Beaned Bucks.\n"
+        save_data(user_data)
+    else:
+        winners_msg = "No winning tickets this draw."
+
+    await interaction.response.send_message(f"Drawn Numbers: {drawn_numbers}\n{winners_msg}")
+
+@tasks.loop(hours=24)
+async def daily_lottery_draw():
+    #calculate delay until next 4pm Eastern
+    now_et = datetime.datetime.now(ZoneInfo("America/New_York"))
+    target_et = now_et.replace(hour=16, minute=0, second=0, microsecond=0)
+    if now_et >= target_et:
+        target_et += datetime.timedelta(days=1)
+    delay = (target_et - now_et).total_seconds()
+    print(f"[Lottery] Waiting {delay} seconds until daily lottery draw.")
+    await asyncio.sleep(delay)
+
+    drawn_numbers, payouts = lottery_draw()
+    #update winners Beaned Bucks.
+    user_data = load_data()
+    winners_msg = ""
+    if payouts:
+        for uid, amount in payouts.items():
+            record = user_data.get(uid, {"balance": 0})
+            record["balance"] = record.get("balance", 0) + amount
+            user_data[uid] = record
+            member = bot.get_guild(GUILD_ID).get_member(int(uid))
+            name = member.display_name if member else f"User {uid}"
+            winners_msg += f"{name} wins {amount:.2f} Beaned Bucks.\n"
+        save_data(user_data)
+    else:
+        winners_msg = "No winning tickets this draw."
+
+    #post the results to a specific channel 
+    channel = discord.utils.get(bot.get_all_channels(), name="bot-output")
+    if channel:
+        await channel.send(f"Daily Lottery Draw at 4pm ET:\nDrawn Numbers: {drawn_numbers}\n{winners_msg}")
+    else:
+        print("Channel not found for lottery.")
+
+@daily_lottery_draw.before_loop
+async def before_daily_lottery_draw():
+    now_et = datetime.datetime.now(ZoneInfo("America/New_York"))
+    #set the target time to today at 4pm ET
+    target_et = now_et.replace(hour=16, minute=0, second=0, microsecond=0)
+    #if its already past 4pm, set the target to tomorrow
+    if now_et >= target_et:
+        target_et += datetime.timedelta(days=1)
+    #calculate delay until the next 4pm ET
+    delay = (target_et - now_et).total_seconds()
+    print(f"Waiting {delay} seconds until next 4pm ET.")
+    await asyncio.sleep(delay)
+
+#onready event
 @bot.event
 async def on_ready():
     print(f"Logged in as {bot.user} (ID: {bot.user.id})")
@@ -1195,5 +1502,8 @@ async def on_ready():
         print(f"Synced {len(synced)} command(s).")
     except Exception as e:
         print(f"Error syncing commands: {e}")
+    update_active_vc_sessions_on_startup()
     stock_market_loop.start()
+    daily_lottery_draw.start()
+
 bot.run(TOKEN)
