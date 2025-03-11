@@ -8,6 +8,7 @@ import datetime
 import asyncio
 from typing import Optional
 import datetime
+import pytz
 
 
 #keys are user IDs (as strings), values are dicts with session data. tracks active VCs
@@ -74,7 +75,7 @@ def save_stock_history(history):
 def update_stock_prices():
     data = load_stocks()         
     history = load_stock_history()  
-    now_iso = datetime.datetime.now().isoformat()
+    now_iso = datetime.datetime.now(pytz.timezone("America/New_York")).isoformat()
     changes = {}
     for stock, price in data.items():
         old_price = price
@@ -488,9 +489,9 @@ async def stock_market_loop():
     embed = discord.Embed(
         title="Stock Market Update",
         color=discord.Color.blue(),
-        timestamp=datetime.datetime.utcnow()
+        timestamp=datetime.datetime.now()
     )
-    embed.set_footer(text="Prices update every 20 minute")
+    embed.set_footer(text="Prices update every 20 minutes")
     
     #add a field for each stock.
     for stock, change in changes.items():
