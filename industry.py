@@ -67,7 +67,7 @@ class IndustryGroup(commands.Cog):
         for user_id, record in data.items():
             facilities = record.get("facilities", {})
             for facility_name, facility_value in facilities.items():
-                # Look up facility definition from the combined facilities dictionary.
+                #look up facility definition from the combined facilities dictionary.
                 facility_def = None
                 for cat in self.industries.values():
                     if facility_name in cat:
@@ -77,30 +77,30 @@ class IndustryGroup(commands.Cog):
                     continue
                 category = facility_def.get("category", "raw")
                 if category == "oil":
-                    # facility_value is expected to be a list of oil well objects.
+                    #facility_value is expected to be a list of oil well objects.
                     new_wells = []
                     total_extracted = 0
                     for well in facility_value:
                         remaining = well["capacity"] - well["extracted"]
                         if remaining <= 0:
-                            # Well is depleted; do not carry it over.
+                            #well is depleted do not carry it over.
                             continue
-                        # Each oil facility extracts 50 barrels per hour (or less if near depletion)
+                        #each oil facility extracts 50 barrels per hour (or less if near depletion)
                         extract = min(50, remaining)
                         well["extracted"] += extract
                         total_extracted += extract
-                        # Only keep wells that still have remaining capacity.
+                        #only keep wells that still have remaining capacity.
                         if well["extracted"] < well["capacity"]:
                             new_wells.append(well)
-                    # Update the user's oil facility list.
+                    #update the user's oil facility list.
                     record["facilities"][facility_name] = new_wells
-                    # Add the extracted oil to the inventory.
+                    #add the extracted oil to the inventory.
                     inventory = record.get("inventory", {})
                     inventory["oil"] = inventory.get("oil", 0) + total_extracted
                     record["inventory"] = inventory
                 else:
-                    # For non-oil facilities: use count and production value.
-                    count = facility_value  # facility_value is a number
+                    #for non-oil facilities: use count and production value.
+                    count = facility_value  
                     if "production" in facility_def:
                         prod_amount = facility_def["production"]
                     else:
