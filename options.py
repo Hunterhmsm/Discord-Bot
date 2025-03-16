@@ -161,7 +161,7 @@ def create_options(stock):
 
             K -= (K_original * 0.1)
         
-        T += 0.25
+        T += 0.5
 
     save_options(options)
 
@@ -182,9 +182,6 @@ class OptionsCog(commands.Cog):
         
         for stock in stock_data:
             if not stock.endswith("COIN"):
-                # Load options data
-                options_data = load_options()
-
                 # Check if the stock exists in the options_data and the structure matches the desired format
                 if stock in options_data and isinstance(options_data[stock], dict):
                     if "price" in options_data[stock] and isinstance(options_data[stock]["expiration"], dict):
@@ -205,6 +202,9 @@ class OptionsCog(commands.Cog):
 
 
         for stock in stock_data:
+            if stock not in options_data and not stock.endswith("COIN"):
+                create_options(stock)
+                options_data = load_options()
             if not stock.endswith("COIN"):
                 options_data[stock]["price"] = stock_data[stock]
 
@@ -275,7 +275,7 @@ class OptionsCog(commands.Cog):
 
                     K -= (K_original * 0.1)
                 
-                T += 0.25
+                T += 0.5
             
             for i in range(len(user_id_list)):
                 user_record = data.get(user_id_list[i], {"options": []})
@@ -289,13 +289,13 @@ class OptionsCog(commands.Cog):
         else:
             for stock in options_data:
                 dates = list(options_data[stock]["expiration"].keys())
+                T = 0.5
                 for i in range(len(dates)):
                     # Options variables
                     today = datetime.datetime.today()
                     S = float(options_data[stock].get("price"))
                     r = 0.04
                     sigma = 0.2
-                    T = 0.5
 
                     next_date = (today + datetime.timedelta(days=i)).replace(hour=20, minute=0)
                     date_string = next_date.strftime('%-m/%d/%Y %-I:%M%p')
@@ -344,12 +344,73 @@ class OptionsCog(commands.Cog):
                         options_data[stock]["expiration"][date_string]["put"]["{:.2f}".format(K)]["put_gamma"] = float("{:.2f}".format(put_gamma))
                         options_data[stock]["expiration"][date_string]["put"]["{:.2f}".format(K)]["put_theta"] = float("{:.2f}".format(put_theta))
                         
-                    T += 0.25
+                    T += 0.5
 
         save_options(options_data)
+
+        for i in range(len(user_id_list)):
+            user_record = data.get(user_id_list[i], {"options": []})
+            if not user_record.get("options"):
+                continue
+            for stock in options_data:
+                for expiration_date in options_data[stock]["expiration"]:
+
+                    call_data = options_data[stock]["expiration"][expiration_date]["call"]
+                    for strike_price in call_data:
+                        for entry in user_record.get("options", []):
+                            if (entry["stock"] == stock and
+                                entry["strategy"] == "call" and
+                                entry["expiration"] == expiration_date and 
+                                entry["strike_price"] == float(strike_price)):
+                                entry["call_price"] = call_data[strike_price].get("call_price")
+
+                    put_data = options_data[stock]["expiration"][expiration_date]["put"]
+                    for strike_price in put_data:
+                        for entry in user_record.get("options", []):
+                            if (entry["stock"] == stock and
+                                entry["strategy"] == "put" and
+                                entry["expiration"] == expiration_date and 
+                                entry["strike_price"] == float(strike_price)):
+                                entry["put_price"] = put_data[strike_price].get("put_price")
+            data[user_id_list[i]] = user_record    
+
         save_data(data)
 
+    @app_commands.guilds(discord.Object(id=GUILD_ID))
+    @app_commands.command(name="options", description="Shows what options you currently own.")
+    @app_commands.describe(user="The user to check options statistics for (defaults to yourself if not provided).")
+    async def user_options(self, interaction: discord.Interaction, user: Optional[discord.Member] = None):
+        target = user or interaction.user
+        data = load_data()
+        user_id = str(target.id)
+        user_record = data.get(user_id, {"options": []})
+        user_options = user_record.get("options", [])
         
+        if not user_options:
+            await interaction.response.send_message("That user does not own any options.", ephemeral=True)
+            return
+        else:
+            embed = discord.Embed(
+                title=f"{target}'s Options",
+                color=discord.Color.purple()
+            )
+            for option in user_options:
+                stock = option["stock"]
+                strike = option["strike_price"]
+                strategy = option["strategy"]
+                strategy_price = option[f"{strategy}_price"]
+                expiration = option["expiration"]
+                quantity = option["quantity"]
+                strategy_upper = strategy.upper()
+                strategy_capital = strategy.capitalize()
+                embed.add_field(
+                    name=f"{stock} {strike} {strategy_upper}",
+                    value=f"{strategy_capital} Price: {strategy_price}\n"
+                          f"Expiration: {expiration}\n"
+                          f"Quantity: {quantity}",
+                    inline=True
+                )
+            await interaction.response.send_message(embed=embed)
 
     @app_commands.guilds(discord.Object(id=GUILD_ID))
     @app_commands.command(name="optionview", description="Browse options for the Beaned stock market (cryptocoins not included).")
@@ -363,7 +424,7 @@ class OptionsCog(commands.Cog):
             await interaction.response.send_message("Please enter an integer.", ephemeral=True)
             return
         if DTE > 3 or DTE < 0:
-            await interaction.response.send_message("You may only view options from 0 to 4 DTE", ephemeral=True)
+            await interaction.response.send_message("You may only view options from 0 to 3 DTE", ephemeral=True)
             return
         if not strategy in ('call', 'put'):
             await interaction.response.send_message(f"Please enter a valid strategy ('call or put').", ephemeral=True)
@@ -503,7 +564,7 @@ class OptionsCog(commands.Cog):
                         "stock": stock,
                         "strategy": strategy,
                         "expiration": target_date,
-                        "call_price": target_option.get(f"{strategy}_price"),
+                        f"{strategy}_price": target_option.get(f"{strategy}_price"),
                         "strike_price": strike_price,
                         "quantity": num_options
                     })
