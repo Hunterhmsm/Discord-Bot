@@ -62,7 +62,7 @@ def lottery_draw():
                 total_payout += share
 
     #calculate the new jackpot 
-    new_jackpot = jackpot - total_payout + 25000
+    new_jackpot = jackpot - total_payout + 50000
     lottery_data["Jackpot"] = new_jackpot
     lottery_data["Tickets"] = []
     save_lottery(lottery_data)
