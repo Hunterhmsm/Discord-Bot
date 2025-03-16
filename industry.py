@@ -63,18 +63,21 @@ class IndustryGroup(commands.Cog):
         super().__init__()
 
     async def hourly_production(self):
-        """Run each hour to add production from built facilities to the user's inventory."""
         data = load_data()
         for user_id, record in data.items():
             facilities = record.get("facilities", {})
-            # Process each facility the user has built.
             for facility_name, facility_value in facilities.items():
-                facility_def = self.industries.get("facilities", {}).get(facility_name)
+                # Look up facility definition from the combined facilities dictionary.
+                facility_def = None
+                for cat in self.industries.values():
+                    if facility_name in cat:
+                        facility_def = cat[facility_name]
+                        break
                 if facility_def is None:
                     continue
                 category = facility_def.get("category", "raw")
                 if category == "oil":
-                    # For oil facilities, facility_value is expected to be a list of well objects.
+                    # facility_value is expected to be a list of oil well objects.
                     new_wells = []
                     total_extracted = 0
                     for well in facility_value:
@@ -82,35 +85,27 @@ class IndustryGroup(commands.Cog):
                         if remaining <= 0:
                             # Well is depleted; do not carry it over.
                             continue
-                        # Each oil well extracts 50 barrels per hour, or less if near depletion.
+                        # Each oil facility extracts 50 barrels per hour (or less if near depletion)
                         extract = min(50, remaining)
                         well["extracted"] += extract
                         total_extracted += extract
-                        # Only keep the well if it still has remaining capacity.
+                        # Only keep wells that still have remaining capacity.
                         if well["extracted"] < well["capacity"]:
                             new_wells.append(well)
-                    # Update the user's record with the remaining wells.
+                    # Update the user's oil facility list.
                     record["facilities"][facility_name] = new_wells
-                    # Add the extracted oil to the user's inventory.
+                    # Add the extracted oil to the inventory.
                     inventory = record.get("inventory", {})
                     inventory["oil"] = inventory.get("oil", 0) + total_extracted
                     record["inventory"] = inventory
                 else:
-                    # For non-oil facilities, facility_value is a count.
-                    count = facility_value
-                    # Determine production from facility definition.
-                    # Try to use an explicit "production" field; if missing, fall back to "base_prod"
+                    # For non-oil facilities: use count and production value.
+                    count = facility_value  # facility_value is a number
                     if "production" in facility_def:
-                        prod_range = facility_def["production"]
-                        # We assume production is a fixed number per facility.
-                        prod_amount = prod_range
+                        prod_amount = facility_def["production"]
                     else:
                         base_prod = facility_def.get("base_prod")
-                        # Use the midpoint of the range for production.
-                        if base_prod:
-                            prod_amount = sum(base_prod) / 2
-                        else:
-                            prod_amount = 0
+                        prod_amount = sum(base_prod) / 2 if base_prod else 0
                     produced = prod_amount * count
                     resource = facility_def.get("resource")
                     if resource:
@@ -120,7 +115,6 @@ class IndustryGroup(commands.Cog):
             data[user_id] = record
         save_data(data)
         print("Hourly production completed.")
-
 
     async def process_contracts(self):
         contracts = load_contracts()
@@ -279,13 +273,17 @@ class IndustryGroup(commands.Cog):
     async def build(self, interaction: discord.Interaction, facility: str):
         facility = facility.lower()
         # Since our JSON now has a top-level "facilities" key:
-        facilities_data = self.industries.get("facilities", {})
+        # Combine all facility definitions from all categories into one dictionary.
+        facilities_data = {}
+        for category in self.industries.values():
+            facilities_data.update(category)
+        
         if facility not in facilities_data:
             await interaction.response.send_message("Invalid facility.", ephemeral=True)
             return
 
         facility_info = facilities_data[facility]
-        build_price = facility_info.get("cost")  # updated to use "cost" instead of "build_price"
+        build_price = facility_info.get("cost")  # using "cost" for building price
         if build_price is None:
             await interaction.response.send_message("This facility cannot be built.", ephemeral=True)
             return
@@ -299,8 +297,36 @@ class IndustryGroup(commands.Cog):
             return
 
         record["balance"] = balance - build_price
-        facilities_owned = record.get("facilities", {})
-        facilities_owned[facility] = facilities_owned.get(facility, 0) + 1
+
+        # Check if the facility is an oil facility.
+        if facility_info.get("category", "") == "oil":
+            # Roll on outcomes to determine the well's total capacity.
+            outcomes = facility_info.get("outcomes", [])
+            r = random.random()
+            cumulative = 0
+            capacity = None
+            for outcome in outcomes:
+                chance = outcome.get("chance", 0)
+                cumulative += chance
+                if r <= cumulative:
+                    low, high = outcome.get("range", [0, 0])
+                    capacity = random.randint(low, high)
+                    break
+            if capacity is None:
+                capacity = 0  # fallback if no outcome matched
+            # Create a well object with capacity and extracted set to 0.
+            well = {"capacity": capacity, "extracted": 0}
+            # Store oil facilities as a list of wells.
+            facilities_owned = record.get("facilities", {})
+            if facility in facilities_owned:
+                facilities_owned[facility].append(well)
+            else:
+                facilities_owned[facility] = [well]
+        else:
+            # For non-oil facilities, just increment count.
+            facilities_owned = record.get("facilities", {})
+            facilities_owned[facility] = facilities_owned.get(facility, 0) + 1
+
         record["facilities"] = facilities_owned
         data[user_id] = record
         save_data(data)
@@ -308,6 +334,7 @@ class IndustryGroup(commands.Cog):
             f"Successfully built {facility} for {build_price} Beaned Bucks. New balance: {record['balance']}.", 
             ephemeral=False
         )
+
     @app_commands.guilds(discord.Object(id=GUILD_ID))
     @app_commands.command(name="industry_industries", description="Show the list of facilities and their details.")
     async def industries(self, interaction: discord.Interaction):
@@ -344,7 +371,7 @@ class IndustryGroup(commands.Cog):
     @app_commands.describe(user="Optional: The user whose industry status you want to view (defaults to yourself)")
     async def industrystatus(self, interaction: discord.Interaction, user: discord.Member = None):
         target = user or interaction.user
-        # Load the user record from data
+        # Load the user’s record from data
         data = load_data()
         user_id = str(target.id)
         record = data.get(user_id, {"facilities": {}, "inventory": {}})
@@ -360,27 +387,45 @@ class IndustryGroup(commands.Cog):
         if facilities_owned:
             facility_lines = []
             # Iterate over each facility the user owns
-            for facility, count in facilities_owned.items():
-                # Look up facility definition in the industries JSON under the "facilities" key
+            for facility, value in facilities_owned.items():
                 facility_info = self.industries.get("facilities", {}).get(facility, {})
                 description = facility_info.get("description", "No description available.")
-                # Try to get production; if not defined, fall back to base_prod range
-                production = facility_info.get("production")
-                if production:
-                    prod_str = ", ".join([f"{k}: {v}/hr" for k, v in production.items()])
+                category = facility_info.get("category", "raw")
+                
+                # Check if the facility is in the oil category
+                if category == "oil":
+                    # For oil facilities, value is expected to be a list of well objects
+                    well_details = []
+                    for idx, well in enumerate(value, start=1):
+                        capacity = well.get("capacity", 0)
+                        extracted = well.get("extracted", 0)
+                        remaining = capacity - extracted
+                        well_details.append(f"Well {idx}: Capacity: {capacity}, Extracted: {extracted}, Remaining: {remaining}")
+                    prod_str = f"Extracts 50 barrels/hr per well"  # Production per well per hour
+                    facility_line = (
+                        f"**{facility.replace('_', ' ').title()}**\n"
+                        f"*{description}*\n"
+                        f"{prod_str}\n"
+                        f"{chr(10).join(well_details)}"
+                    )
                 else:
-                    base_prod = facility_info.get("base_prod")
-                    prod_str = f"{base_prod[0]} - {base_prod[1]}/hr" if base_prod else "None"
-                # Similarly, for consumption, try explicit field then fallback (if needed)
-                consumption = facility_info.get("consumption")
-                if consumption:
-                    cons_str = ", ".join([f"{k}: {v}/hr" for k, v in consumption.items()])
-                else:
-                    cons_str = "None"
-
-                facility_lines.append(
-                    f"**{facility.replace('_', ' ').title()}** (x{count})\n*{description}*\nProduction: {prod_str}\nConsumption: {cons_str}"
-                )
+                    # For non-oil facilities, value is a count.
+                    count = value
+                    if "production" in facility_info:
+                        prod_info = facility_info["production"]
+                        prod_str = ", ".join([f"{k}: {prod_info[k]}/hr" for k in prod_info])
+                    else:
+                        base_prod = facility_info.get("base_prod")
+                        prod_str = f"{base_prod[0]} - {base_prod[1]}/hr" if base_prod else "None"
+                    cons = facility_info.get("consumption", {})
+                    cons_str = ", ".join([f"{k}: {cons[k]}/hr" for k in cons]) if cons else "None"
+                    facility_line = (
+                        f"**{facility.replace('_', ' ').title()}** (x{count})\n"
+                        f"*{description}*\n"
+                        f"Production: {prod_str}\n"
+                        f"Consumption: {cons_str}"
+                    )
+                facility_lines.append(facility_line)
             embed.add_field(name="Facilities", value="\n\n".join(facility_lines), inline=False)
         else:
             embed.add_field(name="Facilities", value="None", inline=False)
@@ -392,6 +437,7 @@ class IndustryGroup(commands.Cog):
             embed.add_field(name="Resource Inventory", value="None", inline=False)
 
         await interaction.response.send_message(embed=embed, ephemeral=True)
+
 
 
     @app_commands.guilds(discord.Object(id=GUILD_ID))
