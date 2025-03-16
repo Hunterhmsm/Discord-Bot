@@ -54,12 +54,25 @@ class HelpCog(commands.Cog):
             "**/cryptosell [quantity]** - Sell your RTX 5090s for $5,000 Beaned Bucks. Don't complain, they've been used to mine crypto.\n"
             "**/mine [crypto]** - Decide what crypto you'd like to mine. You will gain 1 coin/card every 5 minutes.\n"
         )
-        
+        industry = (
+            "**/industry tradecontract** - Set up a trading contract to send a fixed amount of a resource every hour for a specified duration to another user.\n"
+            "**/industry contractstatus** - View your active trading contracts.\n"
+            "**/industry buy** - Buy raw resources from the store.\n"
+            "**/industry sell** - Sell raw resources to the store.\n"
+            "**/industry build** - Build a facility from the industries list.\n"
+            "**/industry status** - View your built facilities and resource inventory (optionally target another user).\n"
+            "**/industry invtransfer** - Transfer a resource from your inventory to another user.\n"
+            "**/industry industries** - List all available industries and their details.\n"
+            "**/industry store** - Show the current store items and their details.\n"
+            "**/industry sellindustry** - Sell one of your built industry facilities at half its base value."
+        )
+
         embed.add_field(name="General", value=general, inline=False)
         embed.add_field(name="Gambling", value=gambling, inline=False)
         embed.add_field(name="Stocks", value=stocks, inline=False)
         embed.add_field(name="Lottery", value=lottery, inline=False)
         embed.add_field(name="Crypto", value=crypto, inline=False)
+        embed.add_field(name="Industry", value=industry, inline=False)
         
         await interaction.response.send_message(embed=embed, ephemeral=True)
 
