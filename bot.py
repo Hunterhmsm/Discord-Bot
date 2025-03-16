@@ -301,6 +301,7 @@ async def on_ready():
     await bot.load_extension("roulette")
     await bot.load_extension("crypto")
     await bot.load_extension("options")
+    await bot.load_extension("industry")
     try:
         synced = await bot.tree.sync(guild=discord.Object(id=GUILD_ID))
         print(f"Synced {len(synced)} command(s).")
