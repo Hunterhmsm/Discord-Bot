@@ -238,33 +238,51 @@ class IndustryGroup(commands.Cog):
     @app_commands.command(name="industry_sell", description="Sell raw resources to the store.")
     @app_commands.describe(
         resource="The resource to sell (e.g., coal, raw_iron, uranium, soy, oil, power)",
-        quantity="Quantity to sell"
+        quantity="Quantity to sell (or 'all' to sell everything)"
     )
-    async def sellraw(self, interaction: discord.Interaction, resource: str, quantity: float):
+    async def sellraw(self, interaction: discord.Interaction, resource: str, quantity: str):
         resource = resource.lower()
         store_resources = self.store.get("raw_resources", {})
         if resource not in store_resources:
             await interaction.response.send_message("Invalid resource.", ephemeral=True)
             return
         sell_price = store_resources[resource]["sell_price"]
-        earnings = sell_price * quantity
-
+        
         data = load_data()
         user_id = str(interaction.user.id)
         record = data.get(user_id, {"balance": 0, "inventory": {}})
         inventory = record.get("inventory", {})
-        if inventory.get(resource, 0) < quantity:
-            await interaction.response.send_message("You do not have enough of that resource to sell.", ephemeral=True)
+        available = inventory.get(resource, 0)
+        
+        if quantity.lower() == "all":
+            sell_quantity = available
+        else:
+            try:
+                sell_quantity = float(quantity)
+            except ValueError:
+                await interaction.response.send_message("Invalid quantity format. Please provide a number or 'all'.", ephemeral=True)
+                return
+
+        if sell_quantity <= 0:
+            await interaction.response.send_message("Quantity must be greater than zero.", ephemeral=True)
             return
 
-        inventory[resource] -= quantity
+        if available < sell_quantity:
+            await interaction.response.send_message(f"You do not have enough of that resource to sell. You only have {available}.", ephemeral=True)
+            return
+
+        earnings = sell_price * sell_quantity
+        inventory[resource] -= sell_quantity
         if inventory[resource] <= 0:
             del inventory[resource]
         record["inventory"] = inventory
         record["balance"] = record.get("balance", 0) + earnings
         data[user_id] = record
         save_data(data)
-        await interaction.response.send_message(f"Sold {quantity} {resource} for {earnings} Beaned Bucks. New balance: {record['balance']}.", ephemeral=False)
+        await interaction.response.send_message(
+            f"Sold {sell_quantity} {resource} for {earnings} Beaned Bucks. New balance: {record['balance']}.", ephemeral=False
+        )
+
 
     # --- Building and Status Commands ---
     @app_commands.guilds(discord.Object(id=GUILD_ID))
