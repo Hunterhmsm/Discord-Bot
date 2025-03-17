@@ -10,9 +10,7 @@ from stocks import load_stocks
 from typing import Optional
 import numpy as np
 from scipy.stats import norm
-
-import numpy as np
-from scipy.stats import norm
+ 
 
 def black_scholes(S, K, T, r, sigma, option_type='call'):
     """
