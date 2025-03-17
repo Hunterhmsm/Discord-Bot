@@ -110,7 +110,7 @@ def update_stock_prices(current_market_event):
             #for non-coin stocks, use the original percentages.
             if event_type == "rally":
                 if random.random() < 0.70:
-                    change_percent = random.uniform(0.10, 0.50)
+                    change_percent = random.uniform(0.10, 0.80)
                     new_price = price * (1 + change_percent)
                 else:
                     change_percent = random.uniform(0.005, 0.05)
