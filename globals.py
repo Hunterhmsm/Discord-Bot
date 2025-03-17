@@ -6,7 +6,7 @@ with open("config.json", "r") as f:
 
 #global configuration variables
 TOKEN = config["testing_token"]
-GUILD_ID = int(config["guild_id"])
+GUILD_ID = int(config["testing_guild_id"])
 TARGET_MEMBER_ID = int(config["target_member_id"])
 TARGET_USER_ID = 398607026176917535
 DATA_FILE = "data.json"
@@ -16,3 +16,7 @@ STOCK_HISTORY_FILE = "stock_history.json"
 UPDATE_INTERVAL_MINUTES = 20 
 LOTTERY_FILE = "lottery.json"
 AFK_CHANNEL_ID = 574668552557297666
+
+
+#rpg globals
+RPG_INVENTORY_FILE = "rpg.json"
