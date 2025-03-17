@@ -15,4 +15,5 @@ STOCK_FILE = "stocks.json"
 STOCK_HISTORY_FILE = "stock_history.json"
 UPDATE_INTERVAL_MINUTES = 20 
 LOTTERY_FILE = "lottery.json"
+OPTIONS_FILE = "options.json"
 AFK_CHANNEL_ID = 574668552557297666
