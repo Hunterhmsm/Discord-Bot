@@ -5,7 +5,7 @@ with open("config.json", "r") as f:
     config = json.load(f)
 
 #global configuration variables
-TOKEN = config["token"]
+TOKEN = config["testing_token"]
 GUILD_ID = int(config["guild_id"])
 TARGET_MEMBER_ID = int(config["target_member_id"])
 TARGET_USER_ID = 398607026176917535
