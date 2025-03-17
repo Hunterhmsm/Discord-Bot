@@ -80,10 +80,10 @@ def update_stock_prices(current_market_event):
             #for coin stocks:
             if event_type == "rally":
                 if random.random() < 0.70:
-                    change_percent = random.uniform(0.10, 10.00)  #rally upward: 10% to %1000
+                    change_percent = random.uniform(0.10, 3.00)  #rally upward: 10% to %300
                     new_price = price * (1 + change_percent)
                 else:
-                    change_percent = random.uniform(0.005, 3.00)  #normal fluctuation: 0.5% to 300%
+                    change_percent = random.uniform(0.005, 0.150)  #normal fluctuation: 0.5% to 150%
                     if random.random() < 0.5:
                         change_percent = random.uniform(0.005, 0.90)  #normal fluctuation: 0.5% to 90%
                         change_percent = -change_percent
@@ -93,23 +93,21 @@ def update_stock_prices(current_market_event):
                     change_percent = random.uniform(0.10, 0.90)  #crash downward: 10% to 90%
                     new_price = price * (1 - change_percent)
                 else:
-                    change_percent = random.uniform(0.005, 3.00)  #normal fluctuation: 0.5% to 300%
+                    change_percent = random.uniform(0.005, 0.90)
                     if random.random() < 0.5:
-                        change_percent = random.uniform(0.005, 0.90)  #normal fluctuation: 0.5% to 90%
                         change_percent = -change_percent
                     new_price = price * (1 + change_percent)
             else:
-                #normal update for coin stocks 0.5% to 300% fluctuation.
-                change_percent = random.uniform(0.005, 3.00)
+                #normal update for coin stocks 0.5% to 50% fluctuation.
+                change_percent = random.uniform(0.005, 0.50)
                 if random.random() < 0.5:
-                    change_percent = random.uniform(0.005, 0.90)  #normal fluctuation: 0.5% to 90%
                     change_percent = -change_percent
                 new_price = price * (1 + change_percent)
         else:
             #for non-coin stocks, use the original percentages.
             if event_type == "rally":
                 if random.random() < 0.70:
-                    change_percent = random.uniform(0.10, 0.50)
+                    change_percent = random.uniform(0.10, 0.20)
                     new_price = price * (1 + change_percent)
                 else:
                     change_percent = random.uniform(0.005, 0.05)
@@ -127,19 +125,17 @@ def update_stock_prices(current_market_event):
                     new_price = price * (1 + change_percent)
             else:
                 if random.random() < 0.01:
+                    jump_factor = random.uniform(0.5, 0.95)
                     if random.random() < 0.5:
-                        jump_factor = random.uniform(0.5, 2.00)
                         new_price = price * (1 + jump_factor)
                     else:
-                        jump_factor = random.uniform(0.5, 0.90)
                         new_price = price * (1 - jump_factor)
                 else:
                     change_percent = random.uniform(0.005, 0.05)
                     if random.random() < 0.5:
                         change_percent = -change_percent
                     new_price = price * (1 + change_percent)
-
-        new_price = max(round(new_price, 2), 0.01)
+                    
         data[stock] = new_price
         absolute_change = round(new_price - old_price, 2)
         percent_change = round(((new_price - old_price) / old_price) * 100, 2) if old_price != 0 else 0
