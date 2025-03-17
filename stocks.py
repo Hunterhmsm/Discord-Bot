@@ -55,6 +55,7 @@ def choose_new_market_event():
                 duration = random.randint(1, 3)
                 return {"event": event, "duration": duration}
     return None
+
 def update_stock_prices(current_market_event):
     data = load_stocks()
     history = load_stock_history()
@@ -80,11 +81,12 @@ def update_stock_prices(current_market_event):
             #for coin stocks:
             if event_type == "rally":
                 if random.random() < 0.70:
-                    change_percent = random.uniform(0.10, 2.00)  #rally upward: 10% to %200
+                    change_percent = random.uniform(0.50, 4.00)  #rally upward: 50% to %400
                     new_price = price * (1 + change_percent)
                 else:
-                    change_percent = random.uniform(0.005, 0.90)  #normal fluctuation: 0.5% to 100%
+                    change_percent = random.uniform(0.005, 0.200)  #normal fluctuation: 0.5% to 200%
                     if random.random() < 0.5:
+                        change_percent = random.uniform(0.005, 0.75)  #normal fluctuation: 0.5% to 75%
                         change_percent = -change_percent
                     new_price = price * (1 + change_percent)
             elif event_type == "crash":
@@ -92,14 +94,15 @@ def update_stock_prices(current_market_event):
                     change_percent = random.uniform(0.10, 0.90)  #crash downward: 10% to 90%
                     new_price = price * (1 - change_percent)
                 else:
-                    change_percent = random.uniform(0.005, 0.90)
+                    change_percent = random.uniform(0.005, 0.75)
                     if random.random() < 0.5:
                         change_percent = -change_percent
                     new_price = price * (1 + change_percent)
             else:
-                #normal update for coin stocks 0.5% to 20% fluctuation.
-                change_percent = random.uniform(0.005, 0.50)
+                #normal update for coin stocks 0.5% to 50% fluctuation.
+                change_percent = random.uniform(0.005, 2.00)
                 if random.random() < 0.5:
+                    change_percent = random.uniform(0.005, .75)
                     change_percent = -change_percent
                 new_price = price * (1 + change_percent)
         else:
@@ -128,6 +131,7 @@ def update_stock_prices(current_market_event):
                     if random.random() < 0.5:
                         new_price = price * (1 + jump_factor)
                     else:
+                        jump_factor = random.uniform(0.5, 0.60)
                         new_price = price * (1 - jump_factor)
                 else:
                     change_percent = random.uniform(0.005, 0.05)
@@ -136,6 +140,8 @@ def update_stock_prices(current_market_event):
                     new_price = price * (1 + change_percent)
 
         new_price = max(round(new_price, 2), 0.01)
+        if is_coin:
+            new_price = max(round(new_price, 8), 0.00000001)
         data[stock] = new_price
         absolute_change = round(new_price - old_price, 2)
         percent_change = round(((new_price - old_price) / old_price) * 100, 2) if old_price != 0 else 0
@@ -357,10 +363,13 @@ class StocksCog(commands.Cog):
         
         #if no specific stock is provided, display current prices for all stocks.
         if stock is None:
-            msg = "**Current Stock Prices:**\n"
-            for sym, price in current_prices.items():
-                msg += f"**{sym}**: {price} Beaned Bucks\n"
-            await interaction.response.send_message(msg)
+            embed = discord.Embed(
+                title = "Current Stock Prices",
+                color=discord.Color.blue()
+            )
+            for sym, price, in current_prices.items():
+                embed.add_field(name=sym, value=f"{price} Beaned Bucks", inline=False)
+            await interaction.response.send_message(embed=embed)
         else:
             stock = stock.upper()
             #check if the stock exists in current data.
@@ -370,20 +379,23 @@ class StocksCog(commands.Cog):
 
             #retrieve current price.
             price = current_prices[stock]
-            msg = f"**{stock}**\nCurrent Price: {price} Beaned Bucks\n\n"
-            
+            embed = discord.Embed(
+                title=f"{stock} Stock Information",
+                color=discord.Color.green()
+            )
+            embed.add_field(name="Current Price", value=f"{price} Beaned Bucks", inline=False)
+ 
             #load the stock history.
             history = load_stock_history()
             if stock in history and history[stock]:
-                msg += "**Price History (last 10 updates):**\n"
                 for record in history[stock][-10:]:
                     timestamp = record["timestamp"]
                     hist_price = record["price"]
-                    msg += f"{timestamp}: {hist_price}\n"
+                    history_text += f"{timestamp}: {hist_price}\n"
+                embed.add_field(name="Price History (Last 10 Updates)", value=history_text, inline=False)
             else:
-                msg += "No history available."
-            
-            await interaction.response.send_message(msg)
+                embed.add_field(name="Price History", value="No history available.", inline=False)
+            await interaction.response.send_message(embed=embed)
 
     @app_commands.guilds(discord.Object(id=GUILD_ID))
     @app_commands.command(name="stockgive", description="Give a stock to another user.")
