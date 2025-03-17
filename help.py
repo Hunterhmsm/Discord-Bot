@@ -66,6 +66,12 @@ class HelpCog(commands.Cog):
             "**/industry store** - Show the current store items and their details.\n"
             "**/industry sellindustry** - Sell one of your built industry facilities at half its base value."
         )
+        options = (
+            "**/options [user]** - Shows what options the user currently owns.\n"
+            "**/optionsview [stock] [strategy] [expiry]** - Browse options for the Beaned stock market (cryptocoins not included).\n"
+            "**/optionbuy [stock] [strategy] [expiry] [strike] [quantity]** - Buy options for the Beaned stock market.\n"
+            "**/optionsell [stock] [strategy] [expiry] [strike] [quantity]** - Sell options for the Beaned stock market.\n"
+        )
 
         embed.add_field(name="General", value=general, inline=False)
         embed.add_field(name="Gambling", value=gambling, inline=False)
@@ -73,6 +79,7 @@ class HelpCog(commands.Cog):
         embed.add_field(name="Lottery", value=lottery, inline=False)
         embed.add_field(name="Crypto", value=crypto, inline=False)
         embed.add_field(name="Industry", value=industry, inline=False)
+        embed.add_field(name="Options", value=options, inline=False)
         
         await interaction.response.send_message(embed=embed, ephemeral=True)
 

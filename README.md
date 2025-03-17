@@ -11,7 +11,9 @@ Features these so far,
         Daily points
         Commands to run every so often for points
         Role Authenticated admin commands
-        Tracking of users various information 
+        Tracking of users various information
+        Crypto Mining
+        Options Trading
 
 
 For setup heres an example config.json

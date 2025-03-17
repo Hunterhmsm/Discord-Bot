@@ -377,7 +377,7 @@ class OptionsCog(commands.Cog):
         save_data(data)
 
     @app_commands.guilds(discord.Object(id=GUILD_ID))
-    @app_commands.command(name="options", description="Shows what options you currently own.")
+    @app_commands.command(name="options", description="Shows what options the user currently owns.")
     @app_commands.describe(user="The user to check options statistics for (defaults to yourself if not provided).")
     async def user_options(self, interaction: discord.Interaction, user: Optional[discord.Member] = None):
         target = user or interaction.user
@@ -408,7 +408,7 @@ class OptionsCog(commands.Cog):
                     value=f"{strategy_capital} Price: {strategy_price}\n"
                           f"Expiration: {expiration}\n"
                           f"Quantity: {quantity}",
-                    inline=True
+                    inline=False
                 )
             await interaction.response.send_message(embed=embed)
 
