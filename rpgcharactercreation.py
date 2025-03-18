@@ -234,6 +234,7 @@ class ConfirmButton(discord.ui.Button):
             "name": view.root_view.character.get("name"),
             "equipment": view.root_view.character.get("equipment"),
             "inventory": {},
+            "conditions:": {},
             "gold": 10
         }
         data[user_id] = character_data
