@@ -20,3 +20,4 @@ AFK_CHANNEL_ID = 574668552557297666
 
 #rpg globals
 RPG_INVENTORY_FILE = "rpg.json"
+RPG_ITEMS_FILE = "rpgitems.json"
