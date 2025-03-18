@@ -69,7 +69,7 @@ def load_options():
                 for i in range(4):
                     today = datetime.datetime.today()
                     next_date = (today + datetime.timedelta(days=i)).replace(hour=20, minute=0, second=0, microsecond=0)
-                    date_string = next_date.strftime('%-m/%d/%Y %-I:%M%p')
+                    date_string = next_date.strftime('%#m/%d/%Y %#I:%M%p')
                     default_data[stock]["expiration"][date_string] = {"call": {}, "put": {}}
             save_options(default_data)
         return default_data
@@ -90,7 +90,7 @@ def create_options(stock):
     for i in range(4):
         today = datetime.datetime.today()
         next_date = (today + datetime.timedelta(days=i)).replace(hour=20, minute=0, second=0, microsecond=0)
-        date_string = next_date.strftime('%-m/%d/%Y %-I:%M%p')
+        date_string = next_date.strftime('%#m/%d/%Y %#I:%M%p')
         options[stock]["expiration"][date_string] = {"call": {}, "put": {}}
     options[stock]["price"] = stock_data[stock]
 
@@ -105,7 +105,7 @@ def create_options(stock):
     # Fill in expiration dates
     for i in range(4):
         next_date = (today + datetime.timedelta(days=i)).replace(hour=20, minute=0, second=0, microsecond=0)
-        date_string = next_date.strftime('%-m/%d/%Y %-I:%M%p')
+        date_string = next_date.strftime('%#m/%d/%Y %#I:%M%p')
 
         K_original = S
         K = K_original * 0.8
@@ -172,9 +172,8 @@ class OptionsCog(commands.Cog):
     async def update_options(self):
         stock_data = load_stocks()
         options_data = load_options()
-
-        right_now = datetime.datetime.today().strftime('%-m/%d/%Y %-I:%M%p')
-        check_date = datetime.datetime.today().replace(hour=20, minute=0).strftime('%-m/%d/%Y %-I:%M%p')
+        right_now = datetime.datetime.today().strftime('%#m/%d/%Y %#I:%M%p')
+        check_date = datetime.datetime.today().replace(hour=20, minute=0).strftime('%#m/%d/%Y %#I:%M%p')
         right_now_dt = datetime.datetime.strptime(right_now, '%m/%d/%Y %I:%M%p')
         check_date_dt = datetime.datetime.strptime(check_date, '%m/%d/%Y %I:%M%p')
         
@@ -217,7 +216,7 @@ class OptionsCog(commands.Cog):
                 sigma = 0.2
                 T = 0.5
                 next_date = (check_date_dt + datetime.timedelta(days=4)).replace(hour=20, minute=0)
-                date_string = next_date.strftime('%-m/%d/%Y %-I:%M%p')
+                date_string = next_date.strftime('%#m/%d/%Y %#I:%M%p')
                 if date_string not in options_data[stock]["expiration"]:
                     options_data[stock]["expiration"][date_string] = {"call": {}, "put": {}}
 
@@ -296,7 +295,7 @@ class OptionsCog(commands.Cog):
                     sigma = 0.2
 
                     next_date = (today + datetime.timedelta(days=i)).replace(hour=20, minute=0)
-                    date_string = next_date.strftime('%-m/%d/%Y %-I:%M%p')
+                    date_string = next_date.strftime('%#m/%d/%Y %#I:%M%p')
 
                     # Update calls for this expiration date
                     strike_price = list(options_data[stock]["expiration"][date_string]["call"].keys())
