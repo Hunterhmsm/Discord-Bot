@@ -113,9 +113,16 @@ class EquipmentSelectView(discord.ui.View):
             "offhand": "Iron Longsword"
         }))
         self.add_item(EquipmentButton("Option 2: Iron Armor, Mace, and Shield", {
-            "armor": "Iron Armor",
-            "weapon": "Mace",
-            "shield": "Shield"
+            "head": "Iron Helmet",
+            "chest": "Iron Breastplate",
+            "hands": "None",
+            "legs": "Leather Pants",
+            "feet":"Iron Boots",
+            "ring": "None",
+            "bracelet": "None",
+            "necklace": "None",
+            "mainhand": "Mace",
+            "offhand": "Wooden Shield"
         }))
 
     def create_embed(self):
@@ -221,7 +228,6 @@ class ConfirmButton(discord.ui.Button):
         await interaction.response.edit_message(embed=view.create_embed(), view=view)
         user_id = str(interaction.user.id)
         data = rpg_load_data()
-        bonuses = update_equipment_bonuses_for_user(user_id)
         character_data = {
             "stats": view.stats,
             "level": 1,
