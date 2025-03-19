@@ -6,7 +6,7 @@ import os
 import random
 import datetime
 from zoneinfo import ZoneInfo
-from globals import STOCK_FILE, GUILD_ID, UPDATE_INTERVAL_MINUTES, COST_PER_GPU
+from globals import STOCK_FILE, GUILD_ID, UPDATE_INTERVAL_MINUTES
 from stocks import load_stocks
 from utils import load_data, save_data
 from typing import Optional
@@ -20,13 +20,14 @@ class CryptoCog(commands.Cog):
 
     async def execute_mine(self):
         data = load_data()
+        stock_data = load_stocks()
         for user_id in data:
             user_record = data.get(user_id, {"balance": 0, "graphics_cards": 0, "mining": None, "portfolio": {}})
             if user_record.get("mining") and user_record.get("graphics_cards"):
                 curr_mining = user_record.get("mining")
                 num_cards = user_record.get("graphics_cards")
                 portfolio = user_record.get("portfolio", {})
-                use_cost = COST_PER_GPU * num_cards
+                use_cost = (stock_data[curr_mining] * 0.50) * num_cards
                 
                 if user_record.get("balance", 0) >= use_cost:
                     user_record["balance"] -= use_cost
