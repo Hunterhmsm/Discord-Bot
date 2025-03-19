@@ -62,7 +62,7 @@ def lottery_draw():
                 total_payout += share
 
     #calculate the new jackpot 
-    new_jackpot = jackpot - total_payout + 50000
+    new_jackpot = jackpot - total_payout + 100000
     lottery_data["Jackpot"] = new_jackpot
     lottery_data["Tickets"] = []
     save_lottery(lottery_data)
@@ -93,21 +93,21 @@ class LotteryCog(commands.Cog):
         user_data = load_data()
         user_id = str(interaction.user.id)
         user_record = user_data.get(user_id, {"balance": 0})
-        if user_record.get("balance", 0) < 1000:
+        if user_record.get("balance", 0) < 5000:
             await interaction.response.send_message("You do not have enough Beaned Bucks to buy a lottery ticket.", ephemeral=True)
             return
 
-        user_record["balance"] -= 1000
+        user_record["balance"] -= 5000
         user_data[user_id] = user_record
         save_data(user_data)
 
         lottery_data = load_lottery()
-        lottery_data["Jackpot"] = lottery_data.get("Jackpot", 100000) + 1000
+        lottery_data["Jackpot"] = lottery_data.get("Jackpot", 100000) + 5000
         ticket = {"user_id": user_id, "numbers": sorted(chosen_numbers)}
         lottery_data["Tickets"].append(ticket)
         save_lottery(lottery_data)
 
-        await interaction.response.send_message(f"Ticket purchased with numbers: {sorted(chosen_numbers)}. 1000 Beaned Bucks deducted.", ephemeral=False)
+        await interaction.response.send_message(f"Ticket purchased with numbers: {sorted(chosen_numbers)}. 5000 Beaned Bucks deducted.", ephemeral=False)
 
     @app_commands.guilds(discord.Object(id=GUILD_ID))
     @app_commands.command(name="lotterytotal", description="View the current lottery jackpot.")
