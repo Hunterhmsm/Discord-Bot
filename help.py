@@ -72,6 +72,11 @@ class HelpCog(commands.Cog):
             "**/optionbuy [stock] [strategy] [expiry] [strike] [quantity]** - Buy options for the Beaned stock market.\n"
             "**/optionsell [stock] [strategy] [expiry] [strike] [quantity]** - Sell options for the Beaned stock market.\n"
         )
+        prestige = (
+            "**/prestigeup** - Adds a level of prestige and wipes your account if you meet requirements.\n"
+            "**/prestigecheck** - Checks the users prestige level and what they need for the next level.\n"
+            "**/prestigedaily** - A daily locked to presitged users." 
+        )
 
         embed.add_field(name="General", value=general, inline=False)
         embed.add_field(name="Gambling", value=gambling, inline=False)
@@ -80,6 +85,7 @@ class HelpCog(commands.Cog):
         embed.add_field(name="Crypto", value=crypto, inline=False)
         embed.add_field(name="Industry", value=industry, inline=False)
         embed.add_field(name="Options", value=options, inline=False)
+        embed.add_field(name="Prestige", value=prestige, inline=False)
         
         await interaction.response.send_message(embed=embed, ephemeral=True)
 

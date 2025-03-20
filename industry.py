@@ -77,32 +77,33 @@ class IndustryGroup(commands.Cog):
                     continue
                 category = facility_def.get("category", "raw")
                 if category == "oil":
-                    #facility_value is expected to be a list of oil well objects.
+                    #for oil facilities, facility_value is expected to be a list of oil well objects.
                     new_wells = []
                     total_extracted = 0
                     for well in facility_value:
                         remaining = well["capacity"] - well["extracted"]
                         if remaining <= 0:
-                            #well is depleted do not carry it over.
-                            continue
-                        #each oil facility extracts 50 barrels per hour (or less if near depletion)
+                            continue  # Well is depleted.
                         extract = min(50, remaining)
                         well["extracted"] += extract
                         total_extracted += extract
-                        #only keep wells that still have remaining capacity.
                         if well["extracted"] < well["capacity"]:
                             new_wells.append(well)
-                    #update the user's oil facility list.
                     record["facilities"][facility_name] = new_wells
-                    #add the extracted oil to the inventory.
                     inventory = record.get("inventory", {})
                     inventory["oil"] = inventory.get("oil", 0) + total_extracted
                     record["inventory"] = inventory
                 else:
-                    #for non-oil facilities: use count and production value.
+                    #for non-oil facilities, facility_value is expected to be a count.
                     count = facility_value  
+                    #deermine production amount.
                     if "production" in facility_def:
-                        prod_amount = facility_def["production"]
+                        prod_info = facility_def["production"]
+                        #if production is a dict, sum the production values.
+                        if isinstance(prod_info, dict):
+                            prod_amount = sum(prod_info.values())
+                        else:
+                            prod_amount = prod_info
                     else:
                         base_prod = facility_def.get("base_prod")
                         prod_amount = sum(base_prod) / 2 if base_prod else 0
@@ -115,6 +116,7 @@ class IndustryGroup(commands.Cog):
             data[user_id] = record
         save_data(data)
         print("Hourly production completed.")
+
 
     async def process_contracts(self):
         contracts = load_contracts()
@@ -389,14 +391,13 @@ class IndustryGroup(commands.Cog):
     @app_commands.describe(user="Optional: The user whose industry status you want to view (defaults to yourself)")
     async def industrystatus(self, interaction: discord.Interaction, user: discord.Member = None):
         target = user or interaction.user
-        # Load the user’s record from data
         data = load_data()
         user_id = str(target.id)
         record = data.get(user_id, {"facilities": {}, "inventory": {}})
         facilities_owned = record.get("facilities", {})
         inventory = record.get("inventory", {})
 
-        # Create an embed for the industry status
+        #create an embed for the industry status
         embed = discord.Embed(
             title=f"{target.display_name}'s Industry Status",
             color=discord.Color.green()
@@ -404,22 +405,20 @@ class IndustryGroup(commands.Cog):
 
         if facilities_owned:
             facility_lines = []
-            # Iterate over each facility the user owns
             for facility, value in facilities_owned.items():
                 facility_info = self.industries.get("facilities", {}).get(facility, {})
                 description = facility_info.get("description", "No description available.")
                 category = facility_info.get("category", "raw")
                 
-                # Check if the facility is in the oil category
                 if category == "oil":
-                    # For oil facilities, value is expected to be a list of well objects
+                    #for oil facilities 'value' is expected to be a list of well objects
                     well_details = []
                     for idx, well in enumerate(value, start=1):
                         capacity = well.get("capacity", 0)
                         extracted = well.get("extracted", 0)
                         remaining = capacity - extracted
                         well_details.append(f"Well {idx}: Capacity: {capacity}, Extracted: {extracted}, Remaining: {remaining}")
-                    prod_str = f"Extracts 50 barrels/hr per well"  # Production per well per hour
+                    prod_str = "Extracts 50 barrels/hr per well"
                     facility_line = (
                         f"**{facility.replace('_', ' ').title()}**\n"
                         f"*{description}*\n"
@@ -427,11 +426,14 @@ class IndustryGroup(commands.Cog):
                         f"{chr(10).join(well_details)}"
                     )
                 else:
-                    # For non-oil facilities, value is a count.
+                    #for non-oil facilities, 'value' is expected to be a count
                     count = value
                     if "production" in facility_info:
                         prod_info = facility_info["production"]
-                        prod_str = ", ".join([f"{k}: {prod_info[k]}/hr" for k in prod_info])
+                        if isinstance(prod_info, dict):
+                            prod_str = ", ".join([f"{k}: {prod_info[k]}/hr" for k in prod_info])
+                        else:
+                            prod_str = f"{prod_info}/hr"
                     else:
                         base_prod = facility_info.get("base_prod")
                         prod_str = f"{base_prod[0]} - {base_prod[1]}/hr" if base_prod else "None"

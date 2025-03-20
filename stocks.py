@@ -363,39 +363,35 @@ class StocksCog(commands.Cog):
         
         #if no specific stock is provided, display current prices for all stocks.
         if stock is None:
-            embed = discord.Embed(
-                title = "Current Stock Prices",
-                color=discord.Color.blue()
-            )
-            for sym, price, in current_prices.items():
+            embed = discord.Embed(title="Current Stock Prices", color=discord.Color.blue())
+            for sym, price in current_prices.items():
                 embed.add_field(name=sym, value=f"{price} Beaned Bucks", inline=False)
             await interaction.response.send_message(embed=embed)
         else:
             stock = stock.upper()
-            #check if the stock exists in current data.
             if stock not in current_prices:
                 await interaction.response.send_message(f"Stock symbol '{stock}' not found.", ephemeral=True)
                 return
 
             #retrieve current price.
             price = current_prices[stock]
-            embed = discord.Embed(
-                title=f"{stock} Stock Information",
-                color=discord.Color.green()
-            )
+            embed = discord.Embed(title=f"{stock} Stock Information", color=discord.Color.green())
             embed.add_field(name="Current Price", value=f"{price} Beaned Bucks", inline=False)
- 
+            
             #load the stock history.
             history = load_stock_history()
             if stock in history and history[stock]:
+                history_text = "**Price History (last 10 updates):**\n" 
                 for record in history[stock][-10:]:
                     timestamp = record["timestamp"]
                     hist_price = record["price"]
                     history_text += f"{timestamp}: {hist_price}\n"
-                embed.add_field(name="Price History (Last 10 Updates)", value=history_text, inline=False)
+                embed.add_field(name="History", value=history_text, inline=False)
             else:
-                embed.add_field(name="Price History", value="No history available.", inline=False)
+                embed.add_field(name="History", value="No history available.", inline=False)
+            
             await interaction.response.send_message(embed=embed)
+
 
     @app_commands.guilds(discord.Object(id=GUILD_ID))
     @app_commands.command(name="stockgive", description="Give a stock to another user.")

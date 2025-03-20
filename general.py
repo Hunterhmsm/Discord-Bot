@@ -269,7 +269,7 @@ class GeneralCog(commands.Cog):
 
 
     @app_commands.guilds(discord.Object(id=GUILD_ID))
-    @app_commands.command(name="wheel", description="Timeout a user randomly with varying durations if you have at least 25,000 Beaned Bucks.")
+    @app_commands.command(name="wheel", description="Timeout a user randomly with varying durations if you have at least 100,000 Beaned Bucks.")
     @app_commands.describe(target="The user to be timed out")
     async def wheel(self, interaction: discord.Interaction, target: discord.Member):
         invoker = interaction.user
@@ -278,11 +278,11 @@ class GeneralCog(commands.Cog):
         user_id = str(invoker.id)
         user_balance = data.get(user_id, {}).get("balance", 0)
         if not has_allowed_role:
-            if user_balance < 25000:
+            if user_balance < 100000:
                 await interaction.response.send_message("You do not have permission to use this command. You must either have one of the allowed roles or at least 10,000 Beaned Bucks.", ephemeral=True)
                 return
             else:
-                data[user_id]["balance"] = user_balance - 25000
+                data[user_id]["balance"] = user_balance - 100000
                 save_data(data)
         options = [
             (60, "60 seconds"),
