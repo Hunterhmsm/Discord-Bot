@@ -193,10 +193,10 @@ async def leavenotification(interaction: discord.Interaction):
 #leaderboard command
 @bot.tree.command(
     name="leaderboard",
-    description="View the leaderboard. Categories: networth, time, timealone, or timeafk.",
+    description="View the leaderboard. Categories: networth, prestige, time, timealone, or timeafk.",
     guild=discord.Object(id=GUILD_ID)
 )
-@app_commands.describe(category="Choose a category: networth, time, timealone, or timeafk")
+@app_commands.describe(category="Choose a category: networth, prestige, time, timealone, or timeafk")
 async def leaderboard(interaction: discord.Interaction, category: str):
     category = category.lower()
     data = load_data()
@@ -229,6 +229,11 @@ async def leaderboard(interaction: discord.Interaction, category: str):
             vc_afk = record.get("vc_afk", 0)
             leaderboard_list.append((user_id, vc_afk))
         title = "AFK Time Leaderboard"
+    elif category == "prestige":
+        for user_id, record in data.items():
+            prestige = record.get("prestige", 0)
+            leaderboard_list.append((user_id, prestige))
+        title = "Prestige Leaderboard"
     else:
         await interaction.response.send_message("Invalid category. Please choose networth, time, timealone, or timeafk.", ephemeral=True)
         return

@@ -23,20 +23,39 @@ class PrestigeCog(commands.Cog):
             await interaction.response.send_message("You have no economy data to prestige.", ephemeral=True)
             return
 
-        #get the current prestige level (default to 0 if not set) and calculate required balance.
         current_prestige = record.get("prestige", 0)
-        required_money = 10 ** (current_prestige + 7)
+        #for prestige level 3 we require 100,000,000 instead of the default.
+        if current_prestige == 2:
+            required_money = 100_000_000
+        else:
+            required_money = 10 ** (current_prestige + 7)
         balance = record.get("balance", 0)
 
-        #if upgrading from prestige 1 to 2, also require a miku factory and a nuclear reactor.
+        #build a list of missing requirements.
+        missing_requirements = []
         if current_prestige == 1:
+            #to go from prestige 1 -> 2 require at least 1 miku_factory and 1 nuclear_power facility.
             facilities = record.get("facilities", {})
-            if facilities.get("miku_factory", 0) < 1 or facilities.get("nuclear_power", 0) < 1:
-                await interaction.response.send_message(
-                    "To prestige to level 2, you must own at least one Miku Factory and one Nuclear Power facility.",
-                    ephemeral=True
-                )
-                return
+            if facilities.get("miku_factory", 0) < 1:
+                missing_requirements.append(f"1 Miku Factory (owned: {facilities.get('miku_factory', 0)})")
+            if facilities.get("nuclear_power", 0) < 1:
+                missing_requirements.append(f"1 Nuclear Power (owned: {facilities.get('nuclear_power', 0)})")
+        elif current_prestige == 2:
+            # To go from prestige 2 -> 3 require at least 5 miku_factory and 100,000 miku_figure in inventory.
+            facilities = record.get("facilities", {})
+            inventory = record.get("inventory", {})
+            if facilities.get("miku_factory", 0) < 5:
+                missing_requirements.append(f"5 Miku Factories (owned: {facilities.get('miku_factory', 0)})")
+            if inventory.get("miku_figure", 0) < 100000:
+                missing_requirements.append(f"100,000 Miku Figures (owned: {inventory.get('miku_figure', 0)})")
+
+        if missing_requirements:
+            await interaction.response.send_message(
+                "You are missing the following requirements for the next prestige: " +
+                ", ".join(missing_requirements),
+                ephemeral=True
+            )
+            return
 
         if balance < required_money:
             await interaction.response.send_message(
@@ -45,7 +64,7 @@ class PrestigeCog(commands.Cog):
             )
             return
 
-        #build new record preserving time accruals and incrementing prestige wipes everything else
+        #build a new record preserving only time accruals and incrementing prestige.
         new_record = {
             "vc_time": record.get("vc_time", 0),
             "vc_timealone": record.get("vc_timealone", 0),
@@ -60,26 +79,8 @@ class PrestigeCog(commands.Cog):
             ephemeral=True
         )
 
-        #create new record preserving time and prestige and incrementing prestige by 1.
-        new_record = {
-            "vc_time": record.get("vc_time", 0),
-            "vc_timealone": record.get("vc_timealone", 0),
-            "vc_afk": record.get("vc_afk", 0),
-            "prestige": current_prestige + 1,
-            "balance": 0
-        }
-        data[user_id] = new_record
-        save_data(data)
-        await interaction.response.send_message(
-            f"Congratulations! You have prestiged to level {current_prestige + 1}. Your economy data has been reset (except for your time accruals and prestige).",
-            ephemeral=True
-        )
-
     @app_commands.guilds(discord.Object(id=GUILD_ID))
-    @app_commands.command(
-        name="prestigecheck", 
-        description="Check your current prestige level and the amount required for the next prestige."
-    )
+    @app_commands.command(name="prestigecheck", description="Check your current prestige level, balance, and the requirements for the next prestige.")
     @app_commands.describe(user="Optional: The user to check (defaults to yourself)")
     async def prestigecheck(self, interaction: discord.Interaction, user: discord.Member = None):
         target = user or interaction.user
@@ -89,17 +90,34 @@ class PrestigeCog(commands.Cog):
         if record is None:
             await interaction.response.send_message("This user has no economy data.", ephemeral=True)
             return
+
         current_prestige = record.get("prestige", 0)
-        required = 10 ** (current_prestige + 7)
+        #calculate the required money (default formula)
+        required_money = 10 ** (current_prestige + 7)
         balance = record.get("balance", 0)
+
+        #define additional requirements based on current prestige level.
+        additional_requirements = ""
+        if current_prestige == 0:
+            additional_requirements = "None"
+        elif current_prestige == 1:
+            additional_requirements = "1 Miku Factory and 1 Nuclear Power facility"
+        elif current_prestige == 2:
+            additional_requirements = "5 Miku Factories and 100,000 Miku Figures in inventory"
+        else:
+            additional_requirements = "None"
+
         embed = discord.Embed(
             title=f"{target.display_name}'s Prestige Status",
             color=discord.Color.gold()
         )
         embed.add_field(name="Current Prestige Level", value=str(current_prestige), inline=False)
         embed.add_field(name="Current Balance", value=f"{balance:,}", inline=False)
-        embed.add_field(name="Required for Next Prestige", value=f"{required:,}", inline=False)
+        embed.add_field(name="Required for Next Prestige", value=f"{required_money:,}", inline=False)
+        embed.add_field(name="Additional Requirements", value=additional_requirements, inline=False)
+
         await interaction.response.send_message(embed=embed, ephemeral=True)
+
 
     @app_commands.guilds(discord.Object(id=GUILD_ID))
     @app_commands.command(name="prestigedaily", description="Claim your daily prestige bonus (requires at least 1 prestige).")
@@ -110,16 +128,37 @@ class PrestigeCog(commands.Cog):
         if record is None:
             await interaction.response.send_message("You have no economy data.", ephemeral=True)
             return
+
         current_prestige = record.get("prestige", 0)
         if current_prestige < 1:
             await interaction.response.send_message("You must have at least 1 prestige to claim a daily bonus.", ephemeral=True)
             return
-        #bonus scales by 50% per prestige level
+
+        # Check for the daily cooldown.
+        now = datetime.datetime.now(datetime.timezone.utc)
+        last_claim_str = record.get("last_prestige_daily")
+        if last_claim_str:
+            last_claim = datetime.datetime.fromisoformat(last_claim_str)
+            if now - last_claim < datetime.timedelta(days=1):
+                remaining = datetime.timedelta(days=1) - (now - last_claim)
+                # Format remaining time as H:M:S
+                remaining_str = str(remaining).split('.')[0]
+                await interaction.response.send_message(
+                    f"You have already claimed your prestige daily bonus. Try again in {remaining_str}.",
+                    ephemeral=True
+                )
+                return
+
+        # Bonus scales by 50% per prestige level.
         factor = 1 + 0.5 * current_prestige
         base_reward = random.randint(10000, 30000)
         reward = int(base_reward * factor)
         balance = record.get("balance", 0)
         record["balance"] = balance + reward
+
+        # Update the daily cooldown timestamp.
+        record["last_prestige_daily"] = now.isoformat()
+
         data[user_id] = record
         save_data(data)
         await interaction.response.send_message(

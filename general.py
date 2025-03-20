@@ -277,6 +277,10 @@ class GeneralCog(commands.Cog):
         data = load_data()
         user_id = str(invoker.id)
         user_balance = data.get(user_id, {}).get("balance", 0)
+        user_prestige = data.get(user_id, {}).get("prestige", 0)
+        if user_prestige < 2:
+            await interaction.response.send_message("You are not high enough prestige to use this command.", ephemeral=True)
+            return
         if not has_allowed_role:
             if user_balance < 100000:
                 await interaction.response.send_message("You do not have permission to use this command. You must either have one of the allowed roles or at least 10,000 Beaned Bucks.", ephemeral=True)

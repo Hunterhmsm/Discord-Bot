@@ -573,82 +573,92 @@ class OptionsCog(commands.Cog):
 
     @app_commands.guilds(discord.Object(id=GUILD_ID))
     @app_commands.command(name="optionsell", description="Sell options for the Beaned stock market (cryptocoins not included).")
-    @app_commands.describe(stock="Stock symbol (e.g. ACME)", strategy="Enter the strategy you want to view ('call' or 'put')",
-                           expiry="How many days to expiration (0-3)", strike="Enter the strike price of the option you'd like to buy",
-                           quantity="Number of options you'd like to buy.")
+    @app_commands.describe(
+        stock="Stock symbol (e.g. ACME)", 
+        strategy="Enter the strategy you want to view ('call' or 'put')",
+        expiry="How many days to expiration (0-3)",
+        strike="Enter the strike price of the option you'd like to sell",
+        quantity="Number of options you'd like to sell."
+    )
     async def option_sell(self, interaction: discord.Interaction, stock: str, strategy: str, expiry: str, strike: str, quantity: str):
         stock = stock.upper()
         try:
             DTE = int(expiry)
             num_options = int(quantity)
         except ValueError:
-            await interaction.response.send_message("Please enter an integer.", ephemeral=True)
+            await interaction.response.send_message("Please enter an integer for expiry and quantity.", ephemeral=True)
             return
+
         try:
             strike_price = float(strike)
         except ValueError:
             await interaction.response.send_message("Please enter a valid strike price.", ephemeral=True)
             return
+
         if DTE > 3 or DTE < 0:
-            await interaction.response.send_message("You may only sell options from 0 to 3 DTE", ephemeral=True)
+            await interaction.response.send_message("You may only sell options from 0 to 3 DTE.", ephemeral=True)
             return
-        if not strategy in ('call', 'put'):
-            await interaction.response.send_message(f"Please enter a valid strategy ('call or put').", ephemeral=True)
+
+        if strategy not in ('call', 'put'):
+            await interaction.response.send_message("Please enter a valid strategy ('call' or 'put').", ephemeral=True)
             return
+
         if num_options < 1:
-            await interaction.response.send_message(f"Enter a quantity greater than 0.", ephemeral=True)
+            await interaction.response.send_message("Enter a quantity greater than 0.", ephemeral=True)
             return
+
         stocks = load_stocks()
         if stock not in stocks or stock.endswith("COIN"):
-            await interaction.response.send_message(f"Please enter a valid stock symbol (check /stocks).", ephemeral=True)
+            await interaction.response.send_message("Please enter a valid stock symbol (check /stocks).", ephemeral=True)
             return
-        
+
         options = load_options()
-        
-        if options[stock]["expiration"]:
-            dates = list(options[stock]["expiration"].keys())
-            target_date = dates[DTE]
-        else:
+        if not options[stock]["expiration"]:
             create_options(stock)
             options = load_options()
-            dates = list(options[stock]["expiration"].keys())
-            target_date = dates[DTE]
-        
+        dates = list(options[stock]["expiration"].keys())
+        target_date = dates[DTE]
+
         data = load_data()
         user_id = str(interaction.user.id)
         user_record = data.get(user_id, {"balance": 0, "options": []})
         user_options = user_record["options"]
-        
+
         if not user_options:
-            await interaction.response.send_message(f"You do not own any options to sell.", ephemeral=True)
+            await interaction.response.send_message("You do not own any options to sell.", ephemeral=True)
             return
+
+        # Determine the correct price key based on the strategy.
+        price_key = f"{strategy}_price"
         exists = False
+        target_option = None
         for entry in user_options:
             if (entry["stock"] == stock and 
                 entry["strategy"] == strategy and 
                 entry["expiration"] == target_date and 
-                entry["call_price"] == entry.get(f"{strategy}_price") and 
+                entry.get(price_key) is not None and
                 entry["strike_price"] == strike_price and
                 entry["quantity"] >= num_options):
                     target_option = entry
                     exists = True
                     break
+
         if not exists:
-            await interaction.response.send_message(f"You do not own any of those options.", ephemeral=True)
+            await interaction.response.send_message("You do not own any of those options.", ephemeral=True)
             return
-        
-        total_owed = target_option.get(f"{strategy}_price") * 100 * num_options
+
+        total_owed = target_option.get(price_key) * 100 * num_options
         user_record["balance"] += total_owed
 
         target_option["quantity"] -= num_options
-        if target_option.get("quantity", 0) <= 0:
+        if target_option["quantity"] <= 0:
             user_options.remove(target_option)
 
         data[user_id] = user_record
         save_data(data)
 
         await interaction.response.send_message(f"Successfully sold {num_options} option(s) for ${total_owed:,} Beaned Bucks.", ephemeral=True)
-        
+
 async def setup(bot: commands.Bot):
     print("Loading OptionsCog...")
     await bot.add_cog(OptionsCog(bot))
