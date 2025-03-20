@@ -13,7 +13,7 @@ class PrestigeCog(commands.Cog):
     @app_commands.guilds(discord.Object(id=GUILD_ID))
     @app_commands.command(
         name="prestigeup", 
-        description="Prestige up if you meet the requirements. (Wipes your economy data except time accruals and prestige)"
+        description="Prestige up if you meet the requirements. (Wipes your economy data)"
     )
     async def prestigeup(self, interaction: discord.Interaction):
         data = load_data()
