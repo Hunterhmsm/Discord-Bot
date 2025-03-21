@@ -36,6 +36,8 @@ async def on_ready():
         await bot.http.delete_global_command(bot.user.id, cmd['id'])
     await bot.load_extension("help")
     await bot.load_extension("rpgcharactercreation")
+    await bot.load_extension("rpginventory")
+
     try:
         synced = await bot.tree.sync(guild=discord.Object(id=GUILD_ID))
         print(f"Synced {len(synced)} command(s).")
