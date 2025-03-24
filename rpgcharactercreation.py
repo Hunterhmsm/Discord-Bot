@@ -91,39 +91,72 @@ class NameModal(discord.ui.Modal, title="Enter Your Name"):
             await interaction.response.send_message(embed=stat_view.create_embed(), view=stat_view, ephemeral=True)
         self.stop()
 
-# ------------------
-# Equipment Selection
-# ------------------
+
 class EquipmentSelectView(discord.ui.View):
     def __init__(self, *, root_view: discord.ui.View):
         super().__init__(timeout=300)
         self.root_view = root_view
-        self.selected_equipment = None  # To store the equipment package
-        # Two buttons for two equipment choices:
-        self.add_item(EquipmentButton("Option 1: Leather Armor & Longsword", {
-            "head": "Leather Helmet",
-            "chest": "Leather Armor",
-            "hands": "None",
-            "legs": "Leather Pants",
-            "feet":"Leather Boots",
-            "ring": "None",
-            "bracelet": "None",
-            "necklace": "None",
-            "mainhand": "Iron Longsword",
-            "offhand": "Iron Longsword"
-        }))
-        self.add_item(EquipmentButton("Option 2: Iron Armor, Mace, and Shield", {
-            "head": "Iron Helmet",
-            "chest": "Iron Breastplate",
-            "hands": "None",
-            "legs": "Leather Pants",
-            "feet":"Iron Boots",
-            "ring": "None",
-            "bracelet": "None",
-            "necklace": "None",
-            "mainhand": "Mace",
-            "offhand": "Wooden Shield"
-        }))
+        self.selected_equipment = None 
+        
+        #get the character's class from the root view.
+        char_class = self.root_view.character.get("class")
+        
+        #or Warrior
+        if char_class == "Warrior":
+            self.add_item(EquipmentButton("Option 1: Leather Armor & Longsword", {
+                "head": "Leather Helmet",
+                "chest": "Leather Armor",
+                "hands": "None",
+                "legs": "Leather Pants",
+                "feet": "Leather Boots",
+                "ring": "None",
+                "bracelet": "None",
+                "necklace": "None",
+                "mainhand": "Iron Longsword",
+                "offhand": "Iron Longsword"
+            }))
+            self.add_item(EquipmentButton("Option 2: Iron Armor, Mace, and Shield", {
+                "head": "Iron Helmet",
+                "chest": "Iron Breastplate",
+                "hands": "None",
+                "legs": "Leather Pants",
+                "feet": "Iron Boots",
+                "ring": "None",
+                "bracelet": "None",
+                "necklace": "None",
+                "mainhand": "Mace",
+                "offhand": "Wooden Shield"
+            }))
+        elif char_class == "Rogue":
+            self.add_item(EquipmentButton("Option: Leather Armor & Dagger", {
+                "head": "Leather Cap",
+                "chest": "Light Leather Armor",
+                "hands": "Leather Gloves",
+                "legs": "Leather Pants",
+                "feet": "Leather Boots",
+                "ring": "None",
+                "bracelet": "None",
+                "necklace": "None",
+                "mainhand": "Dagger",
+                "offhand": "None"
+            }))
+        elif char_class == "Mage":
+            self.add_item(EquipmentButton("Option: Robe & Staff", {
+                "head": "None",
+                "chest": "Cloth Robe",
+                "hands": "None",
+                "legs": "Cloth Pants",
+                "feet": "Soft Shoes",
+                "ring": "None",
+                "bracelet": "None",
+                "necklace": "Amulet of Wisdom",
+                "mainhand": "Staff",
+                "offhand": "None"
+            }))
+        else:
+            # Fallback: If for some reason the class isn't set or recognized,
+            # add a generic default option.
+            self.add_item(EquipmentButton("Default Equipment", {}))
 
     def create_embed(self):
         embed = discord.Embed(
@@ -131,8 +164,8 @@ class EquipmentSelectView(discord.ui.View):
             description="Select one of the following starting equipment packages:",
             color=discord.Color.gold()
         )
-        embed.add_field(name="Option 1", value="Leather Armor & Longsword", inline=False)
-        embed.add_field(name="Option 2", value="Iron Armor, Mace, and Shield", inline=False)
+        # You could also list the options by reading from the items added.
+        embed.add_field(name="Options", value="Choose one of the equipment packages above.", inline=False)
         return embed
 
 class EquipmentButton(discord.ui.Button):
@@ -143,10 +176,10 @@ class EquipmentButton(discord.ui.Button):
     async def callback(self, interaction: discord.Interaction):
         view: EquipmentSelectView = self.view
         view.selected_equipment = self.equipment
-        # Save the equipment choice in the root character creation view.
+        # Save the chosen equipment in the root character creation view.
         view.root_view.character["equipment"] = self.equipment
         await interaction.response.send_message("Equipment selected!", ephemeral=True)
-        # Optionally, you could now proceed to the stat distribution step.
+        # Proceed to the stat distribution step.
         stat_view = StatDistributionView(root_view=view.root_view)
         await interaction.followup.send(embed=stat_view.create_embed(), view=stat_view, ephemeral=True)
         view.stop()
