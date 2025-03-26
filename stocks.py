@@ -86,7 +86,7 @@ def update_stock_prices(current_market_event):
                 else:
                     change_percent = random.uniform(0.005, 0.200)  #normal fluctuation: 0.5% to 200%
                     if random.random() < 0.5:
-                        change_percent = random.uniform(0.005, 0.75)  #normal fluctuation: 0.5% to 75%
+                        change_percent = random.uniform(0.005, 0.95)  #normal fluctuation: 0.5% to 90%
                         change_percent = -change_percent
                     new_price = price * (1 + change_percent)
             elif event_type == "crash":
@@ -94,7 +94,7 @@ def update_stock_prices(current_market_event):
                     change_percent = random.uniform(0.10, 0.90)  #crash downward: 10% to 90%
                     new_price = price * (1 - change_percent)
                 else:
-                    change_percent = random.uniform(0.005, 0.75)
+                    change_percent = random.uniform(0.005, 0.95)
                     if random.random() < 0.5:
                         change_percent = -change_percent
                     new_price = price * (1 + change_percent)
