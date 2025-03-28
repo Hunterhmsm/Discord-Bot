@@ -12,5 +12,7 @@ industries.json
 rpg.json
 backupdata.json
 backupstock.json
+/backups
 
 rpgitems.json
+rpgparties.json

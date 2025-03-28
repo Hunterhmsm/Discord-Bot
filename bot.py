@@ -47,6 +47,23 @@ def update_active_vc_sessions_on_startup():
                         print(f"Added {member.display_name} (ID: {uid}) to active VC sessions.")
 
 
+@tasks.loop(hours=4)
+async def backup_data():
+    backup_dir = "backups"
+    if not os.path.exists(backup_dir):
+        os.makedirs(backup_dir)
+    # Create a unique backup filename with timestamp
+    timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+    backup_file = os.path.join(backup_dir, f"data_backup_{timestamp}.json")
+    try:
+        with open(DATA_FILE, "r") as f:
+            data_content = f.read()
+        with open(backup_file, "w") as f:
+            f.write(data_content)
+        print(f"Backup created at {backup_file}")
+    except Exception as e:
+        print(f"Failed to create backup: {e}")
+
 
 
 # --- Voice State Update Event ---
