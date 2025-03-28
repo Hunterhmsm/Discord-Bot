@@ -2,7 +2,7 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 from globals import RPG_INVENTORY_FILE, GUILD_ID
-from utils import rpg_load_data, rpg_save_data, update_equipment_bonuses_for_user
+from rpgutils import rpg_load_data, rpg_save_data, update_equipment_bonuses_for_user, calculate_starting_hp_mana_stamina, full_heal
 
 # Defines starting stats and other constants.
 INITIAL_STATS = {
@@ -80,16 +80,14 @@ class NameModal(discord.ui.Modal, title="Enter Your Name"):
 
     async def on_submit(self, interaction: discord.Interaction):
         self.root_view.character["name"] = self.name.value
-        # After name is submitted, decide which next step to take.
-        # For example, if the character is a Warrior, go to equipment selection;
-        # otherwise, go to stat distribution.
-        if self.root_view.character.get("class") == "Warrior":
+        #go to equipment selection;
+        if self.root_view.character.get("class") in ("Warrior", "Rogue", "Mage"):
             equip_view = EquipmentSelectView(root_view=self.root_view)
             await interaction.response.send_message(embed=equip_view.create_embed(), view=equip_view, ephemeral=True)
         else:
             stat_view = StatDistributionView(root_view=self.root_view)
             await interaction.response.send_message(embed=stat_view.create_embed(), view=stat_view, ephemeral=True)
-        self.stop()
+
 
 
 class EquipmentSelectView(discord.ui.View):
@@ -129,7 +127,7 @@ class EquipmentSelectView(discord.ui.View):
             }))
         elif char_class == "Rogue":
             self.add_item(EquipmentButton("Option: Leather Armor & Dagger", {
-                "head": "Leather Cap",
+                "head": "None",
                 "chest": "Light Leather Armor",
                 "hands": "Leather Gloves",
                 "legs": "Leather Pants",
@@ -137,7 +135,7 @@ class EquipmentSelectView(discord.ui.View):
                 "ring": "None",
                 "bracelet": "None",
                 "necklace": "None",
-                "mainhand": "Dagger",
+                "mainhand": "Iron Dagger",
                 "offhand": "None"
             }))
         elif char_class == "Mage":
@@ -146,11 +144,11 @@ class EquipmentSelectView(discord.ui.View):
                 "chest": "Cloth Robe",
                 "hands": "None",
                 "legs": "Cloth Pants",
-                "feet": "Soft Shoes",
+                "feet": "Wooden Sandals",
                 "ring": "None",
                 "bracelet": "None",
-                "necklace": "Amulet of Wisdom",
-                "mainhand": "Staff",
+                "necklace": "Lesser Amulet of Mana",
+                "mainhand": "Wooden Staff",
                 "offhand": "None"
             }))
         else:
@@ -261,10 +259,12 @@ class ConfirmButton(discord.ui.Button):
         await interaction.response.edit_message(embed=view.create_embed(), view=view)
         user_id = str(interaction.user.id)
         data = rpg_load_data()
+        calculate_starting_hp_mana_stamina(user_id)
         character_data = {
             "stats": view.stats,
             "level": 1,
             "experience": 0,
+            "experience_needed": 100,
             "armor": 0,
             "speed": 0,
             "gender": view.root_view.character.get("gender"),
@@ -278,7 +278,9 @@ class ConfirmButton(discord.ui.Button):
         }
         data[user_id] = character_data
         rpg_save_data(data)
+        calculate_starting_hp_mana_stamina(user_id)
         update_equipment_bonuses_for_user(user_id)
+        full_heal(user_id)
         await interaction.followup.send("Your character has been saved!", ephemeral=True)
         view.stop()
 
