@@ -331,5 +331,6 @@ async def on_ready():
     except Exception as e:
         print(f"Error syncing commands: {e}")
     update_active_vc_sessions_on_startup()
+    backup_data.start()
 
 bot.run(TOKEN)
