@@ -88,44 +88,35 @@ def calculate_equipment_bonuses(equipment: dict, items_data: dict) -> dict:
 
 
 def update_equipment_bonuses_for_user(user_id: str) -> dict:
-    """
-    Loads the character for the given user ID, calculates equipment bonuses using
-    the character's equipment and the items data (from rpgitems.json), then updates:
-      - The effective base stats (for Strength, Dexterity, etc.) by adding the bonus.
-      - The "armor" field with any armor bonus.
-      - The "speed" field as the sum of the derived speed bonus (which already includes the bonus from Dexterity)
-        and any base speed (if stored).
-      - The max HP, Mana, and Stamina by adding the equipment bonus to the character’s current max values.
-    Finally, it saves the updated character data and returns the equipment bonus dictionary.
-    """
-    data = rpg_load_data()  # This function loads your RPG data (a dict)
+    data = rpg_load_data()  # Load all data
     if user_id not in data:
         return {key: 0 for key in ["Strength", "Dexterity", "Intelligence", "Willpower", "Fortitude", "Charisma", "Armor", "Speed", "HP", "Mana", "Stamina"]}
     
     character = data[user_id]
-    equipment = character.get("equipment", {})  # e.g. {"head": "Leather Helmet", ...}
-    items_data = load_rpg_items()  # This function should load your items from rpgitems.json
-    # Calculate the bonuses based on equipped items.
+    equipment = character.get("equipment", {})
+    items_data = load_rpg_items()  # Load item definitions
+    # Calculate bonus from equipment
     equip_bonus = calculate_equipment_bonuses(equipment, items_data)
     
-    # Use the current stats as the base stats.
-    base_stats = character.get("stats", {})
+    # If no base stats have been stored, set them now.
+    if "base_stats" not in character:
+        # Copy the current stats as the unmodified base stats.
+        character["base_stats"] = character.get("stats", {}).copy()
     
+    base_stats = character["base_stats"]
     effective_stats = {}
     for stat in ["Strength", "Dexterity", "Intelligence", "Willpower", "Fortitude", "Charisma"]:
         effective_stats[stat] = base_stats.get(stat, 0) + equip_bonus.get(stat, 0)
     
+    # Set the effective stats on the character.
     character["stats"] = effective_stats
-    character["equipment_bonus"] = equip_bonus  # For tracking purposes
+    character["equipment_bonus"] = equip_bonus
     
-    # Update armor and speed.
+    # Update armor and speed as needed.
     character["armor"] = equip_bonus.get("Armor", 0)
-    # Derived speed: effective speed = bonus derived from equipment + half of effective Dexterity.
     character["speed"] = equip_bonus.get("Speed", 0) + (effective_stats.get("Dexterity", 0) // 2)
     
-    # Update max_hp, max_mana, and max_stamina.
-    # If these already exist in the character, add the corresponding bonus.
-    # (If they don't exist, you might want to initialize them elsewhere.)
+    # Optionally update max_hp, max_mana, max_stamina similarly.
     base_hp = character.get("max_hp", 0)
     base_mana = character.get("max_mana", 0)
     base_stamina = character.get("max_stamina", 0)

@@ -264,7 +264,6 @@ class ConfirmButton(discord.ui.Button):
             "stats": view.stats,
             "level": 1,
             "experience": 0,
-            "experience_needed": 100,
             "armor": 0,
             "speed": 0,
             "gender": view.root_view.character.get("gender"),

@@ -3,7 +3,7 @@ from discord import app_commands, Interaction
 from discord.ext import commands
 from typing import Optional
 from globals import RPG_INVENTORY_FILE, GUILD_ID
-from rpgutils import rpg_load_data, rpg_save_data, load_rpg_items
+from rpgutils import rpg_load_data, rpg_save_data, load_rpg_items, update_equipment_bonuses_for_user
 
 #helper
 def get_item_definition(item_name: str) -> dict:
@@ -52,6 +52,8 @@ def swap_equip_item(user_id: str, new_item: dict, slot: str):
     user_data["inventory"] = inventory
     data[user_id] = user_data
     rpg_save_data(data)
+    update_equipment_bonuses_for_user(user_id)
+
 
 #helper function
 def equip_two_handed(user_id: str, new_item: dict):
@@ -97,8 +99,9 @@ def equip_two_handed(user_id: str, new_item: dict):
     user_data["inventory"] = inventory
     data[user_id] = user_data
     rpg_save_data(data)
+    update_equipment_bonuses_for_user(user_id)
 
-#view for choosing which hand for an either-hand item.
+
 class EquipEitherHandView(discord.ui.View):
     def __init__(self, item: dict, user_id: str):
         super().__init__(timeout=30)
@@ -109,15 +112,62 @@ class EquipEitherHandView(discord.ui.View):
     async def mainhand(self, interaction: discord.Interaction, button: discord.ui.Button):
         swap_equip_item(self.user_id, self.item, "mainhand")
         await interaction.response.send_message(f"Equipped **{self.item['name']}** in mainhand.", ephemeral=True)
+        # Refresh the main inventory view after equipping.
+        data = rpg_load_data()
+        record = data.get(self.user_id)
+        equipment = record.get("equipment", {})
+        inventory_items = record.get("inventory", {})
+        gold = record.get("gold", 0)
+        new_embed = discord.Embed(
+            title=f"{interaction.user.display_name}'s Inventory",
+            color=discord.Color.blue()
+        )
+        new_embed.add_field(
+            name="Equipped Items",
+            value="\n".join([f"{slot.title()}: {item}" for slot, item in equipment.items()]),
+            inline=False
+        )
+        if inventory_items:
+            inv_str = "\n".join([f"{name}: {qty}" for name, qty in inventory_items.items()])
+        else:
+            inv_str = "No items in inventory."
+        new_embed.add_field(name="Other Inventory Items", value=inv_str, inline=False)
+        new_embed.add_field(name="Gold", value=str(gold), inline=False)
+        new_view = CombinedInventoryView(inventory_items, equipment, self.user_id)
+        # Send a followup message with updated data.
+        await interaction.followup.send(embed=new_embed, view=new_view, ephemeral=True)
         self.stop()
 
     @discord.ui.button(label="Offhand", style=discord.ButtonStyle.primary)
     async def offhand(self, interaction: discord.Interaction, button: discord.ui.Button):
         swap_equip_item(self.user_id, self.item, "offhand")
         await interaction.response.send_message(f"Equipped **{self.item['name']}** in offhand.", ephemeral=True)
+        # Refresh the main inventory view after equipping.
+        data = rpg_load_data()
+        record = data.get(self.user_id)
+        equipment = record.get("equipment", {})
+        inventory_items = record.get("inventory", {})
+        gold = record.get("gold", 0)
+        new_embed = discord.Embed(
+            title=f"{interaction.user.display_name}'s Inventory",
+            color=discord.Color.blue()
+        )
+        new_embed.add_field(
+            name="Equipped Items",
+            value="\n".join([f"{slot.title()}: {item}" for slot, item in equipment.items()]),
+            inline=False
+        )
+        if inventory_items:
+            inv_str = "\n".join([f"{name}: {qty}" for name, qty in inventory_items.items()])
+        else:
+            inv_str = "No items in inventory."
+        new_embed.add_field(name="Other Inventory Items", value=inv_str, inline=False)
+        new_embed.add_field(name="Gold", value=str(gold), inline=False)
+        new_view = CombinedInventoryView(inventory_items, equipment, self.user_id)
+        await interaction.followup.send(embed=new_embed, view=new_view, ephemeral=True)
         self.stop()
 
-#interactive select for equippable items.
+
 class EquipSelect(discord.ui.Select):
     def __init__(self, options, user_id: str):
         super().__init__(placeholder="Select an item to equip", min_values=1, max_values=1, options=options)
@@ -131,8 +181,10 @@ class EquipSelect(discord.ui.Select):
             return
         slot_type = item_def.get("slot")
         if slot_type == "eitherhand":
+            # Show the subview and return immediately.
             await interaction.response.send_message("Choose which hand to equip:", ephemeral=True,
                                                     view=EquipEitherHandView(item_def, self.user_id))
+            return  # Do not continue to refresh the main view.
         elif slot_type == "twohanded":
             equip_two_handed(self.user_id, item_def)
             await interaction.response.send_message(f"Equipped **{item_def['name']}** in both hands.", ephemeral=True)
@@ -140,7 +192,7 @@ class EquipSelect(discord.ui.Select):
             swap_equip_item(self.user_id, item_def, slot_type)
             await interaction.response.send_message(f"Equipped **{item_def['name']}** in {slot_type}.", ephemeral=True)
 
-        #fefresh the view
+        # Refresh the view only if not an eitherhand item.
         data = rpg_load_data()
         record = data.get(self.user_id)
         equipment = record.get("equipment", {})
@@ -159,10 +211,11 @@ class EquipSelect(discord.ui.Select):
         new_embed.add_field(name="Other Inventory Items", value=inv_str, inline=False)
         new_embed.add_field(name="Gold", value=str(gold), inline=False)
 
-        #create a new combined view.
+        # Create a new combined view.
         new_view = CombinedInventoryView(inventory_items, equipment, self.user_id)
         await interaction.edit_original_response(embed=new_embed, view=new_view)
         self.view.stop()
+
 
 
 def unequip_item(user_id: str, slot: str) -> str:
@@ -191,11 +244,12 @@ def unequip_item(user_id: str, slot: str) -> str:
         equipment[slot] = "None"
         add_to_inventory(inventory, current_item)
         result = f"Unequipped {current_item} from {slot}."
-
+    
     user_data["equipment"] = equipment
     user_data["inventory"] = inventory
     data[user_id] = user_data
     rpg_save_data(data)
+    update_equipment_bonuses_for_user(user_id)
     return result
 
 #view for selecting an equipment slot to unequip.
