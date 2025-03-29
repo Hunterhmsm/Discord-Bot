@@ -20,3 +20,4 @@ backupstock.json
 rpgitems.json
 rpgparties.json
 __pycache__/
+/backups
