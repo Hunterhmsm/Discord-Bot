@@ -15,9 +15,6 @@ def rpg_save_data(data):
     with open(RPG_INVENTORY_FILE, "w") as f:
         json.dump(data, f, indent=4)      
 
-import json
-from utils import rpg_load_data, rpg_save_data  # your functions to load/save RPG data
-
 ITEMS_FILE = "rpgitems.json"
 
 def load_rpg_items():
