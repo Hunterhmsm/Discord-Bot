@@ -103,6 +103,13 @@ class PartyInviteButton(discord.ui.Button):
             await interaction.followup.send("You took too long to mention a user.", ephemeral=True)
             return
         invitee = msg.mentions[0]
+
+        #check if the invited user has a character
+        rpg_data = rpg_load_data()
+        if str(invitee.id) not in rpg_data:
+            await interaction.followup.send(f"{invitee.display_name} does not have a character.", ephemeral=True)
+            return
+
         parties = load_parties()
         party_id = None
         for pid, party in parties.items():
@@ -117,7 +124,6 @@ class PartyInviteButton(discord.ui.Button):
             return
         party_info = parties[party_id]
         #prepare a DM to the invitee including party name and current members (by character name)
-        rpg_data = rpg_load_data()
         member_names = []
         for member_id in party_info["members"]:
             member_char = rpg_data.get(member_id, {})
@@ -131,6 +137,7 @@ class PartyInviteButton(discord.ui.Button):
             await interaction.followup.send(f"Invitation sent to {invitee.display_name}.", ephemeral=True)
         except discord.Forbidden:
             await interaction.followup.send("Could not send a DM to that user.", ephemeral=True)
+
 
 #button for leaving a party.
 class PartyLeaveButton(discord.ui.Button):

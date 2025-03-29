@@ -15,12 +15,10 @@ def rpg_save_data(data):
     with open(RPG_INVENTORY_FILE, "w") as f:
         json.dump(data, f, indent=4)      
 
-ITEMS_FILE = "rpgitems.json"
-
 def load_rpg_items():
     """Load items data from rpgitems.json."""
     try:
-        with open(ITEMS_FILE, "r") as f:
+        with open(RPG_ITEMS_FILE, "r") as f:
             return json.load(f)
     except Exception as e:
         print(f"Error loading items data: {e}")
@@ -153,9 +151,9 @@ def calculate_starting_hp_mana_stamina(user_id: str) -> tuple:
     intelligence = stats.get("Intelligence", 0)
 
     #calculate bonuses 
-    bonus = fortitude // 2         
-    stamina_bonus = strength // 2    
-    mana_bonus = intelligence // 2   
+    bonus = max(fortitude // 2, 1)        
+    stamina_bonus = max(strength // 2, 1)
+    mana_bonus = max(intelligence // 2, 1)
 
     #get character class in lowercase to avoid case-sensitivity issues.
     char_class = character.get("class", "").strip().lower()

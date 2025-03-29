@@ -275,14 +275,26 @@ class InventoryEquipView(discord.ui.View):
 class CombinedInventoryView(discord.ui.View):
     def __init__(self, inventory_items: dict, equipment: dict, user_id: str):
         super().__init__(timeout=60)
-        #create the equip select view and add its children.
+        self.owner_id = int(user_id)
+
         equip_view = InventoryEquipView(inventory_items, user_id)
         for child in equip_view.children:
-            self.add_item(child)
-        #create the unequip select view and add its children.
+            if isinstance(child, discord.ui.Select) and child.options:
+                self.add_item(child)
+
         unequip_view = EquipmentUnequipView(equipment, user_id)
         for child in unequip_view.children:
-            self.add_item(child)
+            if isinstance(child, discord.ui.Select) and child.options:
+                self.add_item(child)
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        if interaction.user.id != self.owner_id:
+            await interaction.response.send_message("You can't interact with someone else's inventory.", ephemeral=True)
+            return False
+        return True
+
+
+
 #the main Cog.
 class RPGInventory(commands.Cog):
     def __init__(self, bot: commands.Bot):
@@ -320,12 +332,12 @@ class RPGInventory(commands.Cog):
         fortitude = stats.get("Fortitude", 0)
         charisma = stats.get("Charisma", 0)
 
-        strengthb = strength // 2
-        dexterityb = dexterity // 2
-        intelligenceb = intelligence // 2
-        willpowerb = willpower // 2
-        fortitudeb = fortitude // 2
-        charismab = charisma // 2
+        strengthb = max(strength // 2, 1)
+        dexterityb = max(dexterity // 2, 1)
+        intelligenceb = max(intelligence // 2, 1)
+        willpowerb = max(willpower // 2, 1)        
+        fortitudeb = max(fortitude // 2, 1)
+        charismab = max(charisma // 2, 1)
 
         embed = discord.Embed(
             title=f"{charactername}'s Status",
@@ -402,13 +414,12 @@ class RPGInventory(commands.Cog):
             "mainhand": "None",
             "offhand": "None"
         })
-        inventory_items = record.get("inventory", {}) 
+        inventory_items = record.get("inventory", {})  
         gold = record.get("gold", 0)
 
         equipment_str = "\n".join([f"{slot.title()}: {item}" for slot, item in equipment.items()])
-
         if inventory_items:
-            inventory_str = "\n".join([f"{item_name}: {quantity}" for item_name, quantity in inventory_items.items()])
+            inventory_str = "\n".join([f"{name}: {qty}" for name, qty in inventory_items.items()])
         else:
             inventory_str = "No items in inventory."
 
@@ -420,8 +431,14 @@ class RPGInventory(commands.Cog):
         embed.add_field(name="Other Inventory Items", value=inventory_str, inline=False)
         embed.add_field(name="Gold", value=str(gold), inline=False)
         
-        combined_view = CombinedInventoryView(inventory_items, equipment, user_id)
-        await interaction.response.send_message(embed=embed, view=combined_view)
+        #only attach the interactive view if the user is viewing their own inventory
+        if target.id == interaction.user.id:
+            combined_view = CombinedInventoryView(inventory_items, equipment, str(target.id))
+            await interaction.response.send_message(embed=embed, view=combined_view)
+        else:
+            await interaction.response.send_message(embed=embed)
+
+
 
 async def setup(bot: commands.Bot):
     print("Loading RPGInventoryCog...")
