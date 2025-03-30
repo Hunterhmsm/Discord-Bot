@@ -187,7 +187,7 @@ def calculate_starting_hp_mana_stamina(user_id: str) -> tuple:
 
 #function to full heal
 def full_heal(user_id: str) -> tuple:
-    data = rpg_load_data()  #
+    data = rpg_load_data()
     if user_id not in data:
         #if there's no character data just do whatever
         return 0, 0, 0

@@ -39,6 +39,7 @@ async def on_ready():
     await bot.load_extension("rpginventory")
     await bot.load_extension("rpgparties")
     await bot.load_extension("rpglevelup")
+    await bot.load_extension("rpggeneral")
     try:
         synced = await bot.tree.sync(guild=discord.Object(id=GUILD_ID))
         print(f"Synced {len(synced)} command(s).")
