@@ -21,14 +21,14 @@ class RPGGeneral(commands.Cog):
         character = data[user_id]
         gold = character["gold"]
         if gold < 50:
-            await interaction.response.send_message("You don't have enough gold. You need 50 gold to rest.")
+            await interaction.response.send_message("You don't have enough gold. You need 50 gold to rest.", ephemeral=True)
             return
         else:
             gold -= 50
             character["gold"] = gold
             rpg_save_data(data)
             full_heal(user_id)
-            await interaction.response.send_message("You have rested. You have paid 50 gold.")
+            await interaction.response.send_message("You have rested. You have paid 50 gold.", ephemeral=True)
             return
 
 async def setup(bot: commands.Bot):
