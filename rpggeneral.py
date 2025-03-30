@@ -15,6 +15,9 @@ class RPGGeneral(commands.Cog):
     async def portfolio(self, interaction: discord.Interaction):
         user_id = str(interaction.user.id)
         data = rpg_load_data()
+        if user_id not in data:
+            await interaction.response.send_message("You don't have a character.", ephemeral=True)
+            return
         character = data[user_id]
         gold = character["gold"]
         if gold < 50:
