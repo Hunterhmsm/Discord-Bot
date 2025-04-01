@@ -14,12 +14,13 @@ import random
 
 class CombatTurnManager:
     def __init__(self, player_ids: list[str]):
-        player_data = rpg_load_data()
-        print(player_data)
+        local_player_data = rpg_load_data()
+        print(local_player_data)
         self.turn_order = [
             {
                 "id": player_id,
-                "initiative": player_data[player_id]["speed"] + roll_d12(),
+                "name": local_player_data[player_id],
+                "initiative": local_player_data[player_id]["speed"] + roll_d12(),
             }
             for player_id in player_ids
         ]
@@ -47,7 +48,14 @@ class CombatView(discord.ui.View):
     def __create_embed(self):
         embed = discord.Embed(
             title="Combat Encounter",
-            description=f"You have encountered enemies!\n\n",
+            description=(
+                "```"
+                "Left Column         |         Right Column\n"
+                "------------------------------------------\n"
+                "Row 1: Left Text    |    Row 1: Right Text\n"
+                "Row 2: Left Text    |    Row 2: Right Text\n"
+                "```"
+            ),
             color=discord.Color.red(),
         )
         return embed
