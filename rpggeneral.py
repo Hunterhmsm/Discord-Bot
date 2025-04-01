@@ -30,11 +30,11 @@ class RPGGeneral(commands.Cog):
             character["gold"] = gold
             rpg_save_data(data)
             full_heal(user_id)
-            await interaction.response.send_message("You have rested. You have paid 50 gold.", ephemeral=True)
+            await interaction.response.send_message("You have rested and paid 50 gold.", ephemeral=True)
             return
         
     @app_commands.guilds(discord.Object(id=GUILD_ID))
-    @app_commands.command(name="graveyard", description="View all graveyard entries.")
+    @app_commands.command(name="graveyard", description="View all graveyard tombs.")
     async def graveyard(self, interaction: discord.Interaction):
         #check if the graveyard file exists
         if not os.path.exists(GRAVEYARD_FILE):
