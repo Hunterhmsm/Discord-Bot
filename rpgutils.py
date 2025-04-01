@@ -1,4 +1,4 @@
-from globals import DATA_FILE, RPG_INVENTORY_FILE, RPG_ITEMS_FILE
+from globals import DATA_FILE, RPG_INVENTORY_FILE, RPG_ITEMS_FILE, GRAVEYARD_FILE
 import os
 import json
 from typing import Optional
@@ -208,8 +208,7 @@ def full_heal(user_id: str) -> tuple:
 
     return maxhp, maxmana, maxstamina
 
-#defining graveyard here since i dont think its needed anywheres else
-GRAVEYARD_FILE = "rpggraveyard.json"
+#defining backup here since i dont think its needed anywheres else
 BACKUP_FILE = "rpgbackup.json"
 def add_to_graveyard(user_id: str, enemy: Optional[str] = None):
     #open the graveyard file or default
