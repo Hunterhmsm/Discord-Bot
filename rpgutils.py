@@ -1,6 +1,8 @@
 from globals import DATA_FILE, RPG_INVENTORY_FILE, RPG_ITEMS_FILE
 import os
 import json
+from typing import Optional
+import datetime
 
 def rpg_load_data():
     if not os.path.exists(DATA_FILE):
@@ -205,3 +207,50 @@ def full_heal(user_id: str) -> tuple:
     rpg_save_data(data)
 
     return maxhp, maxmana, maxstamina
+
+#defining graveyard here since i dont think its needed anywheres else
+GRAVEYARD_FILE = "rpggraveyard.json"
+BACKUP_FILE = "rpgbackup.json"
+def add_to_graveyard(user_id: str, enemy: Optional[str] = None):
+    #open the graveyard file or default
+    if os.path.exists(GRAVEYARD_FILE):
+        with open(GRAVEYARD_FILE, "r") as f:
+            try:
+                graveyard = json.load(f)
+            except json.JSONDecodeError:
+                graveyard = []
+    else:
+        graveyard = []
+    #load user data and get killer, default to unknown
+    data = rpg_load_data()
+    killer = enemy
+    if enemy is None:
+        killer = "Unknown"
+    character = data[user_id]
+    level = character["level"]
+    name = character["name"]
+    #setup the entry
+    entry = f"Level [{level}], {name} was killed by {killer}."
+    graveyard.append(entry)
+    with open(GRAVEYARD_FILE, "w") as f:
+        json.dump(graveyard, f, indent=4)
+
+    #backup the entire character incase of bugs so we can restore :D
+    backup_entry = {
+        "user_id": user_id,
+        "timestamp": datetime.datetime.utcnow().isoformat(),
+        "character": character
+    }
+    
+    if os.path.exists(BACKUP_FILE):
+        with open(BACKUP_FILE, "r") as f:
+            try:
+                backup_data = json.load(f)
+            except json.JSONDecodeError:
+                backup_data = []
+    else:
+        backup_data = []
+    backup_data.append(backup_entry)
+    with open(BACKUP_FILE, "w") as f:
+        json.dump(backup_data, f, indent=4)
+    

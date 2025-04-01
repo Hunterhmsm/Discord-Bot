@@ -21,3 +21,5 @@ rpgitems.json
 rpgparties.json
 __pycache__/
 /backups
+rpgbackup.json
+rpggraveyard.json

@@ -2,7 +2,7 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 from globals import RPG_INVENTORY_FILE, GUILD_ID
-from rpgutils import rpg_load_data, rpg_save_data, update_equipment_bonuses_for_user, calculate_starting_hp_mana_stamina, full_heal
+from rpgutils import rpg_load_data, rpg_save_data, update_equipment_bonuses_for_user, calculate_starting_hp_mana_stamina, full_heal, add_to_graveyard
 
 # Defines starting stats and other constants.
 INITIAL_STATS = {
@@ -332,6 +332,7 @@ class DeleteCharacter(discord.ui.Modal, title="Character Deletion"):
         if self.answer.value == "YES":
             data = rpg_load_data()
             user_id = str(interaction.user.id)
+            add_to_graveyard(user_id, "Deleted")
             #delete the data then save it
             if user_id in data:
                 del data[user_id]
