@@ -55,7 +55,7 @@ class RPGGeneral(commands.Cog):
         #create an embed listing all entries.
         description = "\n".join(entries)
         embed = discord.Embed(
-            title="Graveyard Entries",
+            title="Graveyard Tombs",
             description=description,
             color=discord.Color.dark_red()
         )
