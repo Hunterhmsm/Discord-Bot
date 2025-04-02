@@ -16,3 +16,5 @@ backupstock.json
 
 rpgitems.json
 rpgparties.json
+rpgbackup.json
+.gitignore
