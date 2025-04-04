@@ -23,3 +23,5 @@ AFK_CHANNEL_ID = 574668552557297666
 RPG_INVENTORY_FILE = "./rpg.json"
 RPG_ITEMS_FILE = "rpgitems.json"
 RPG_PARTIES_FILE = "rpgparties.json"
+GRAVEYARD_FILE = "rpggraveyard.json"
+

@@ -362,7 +362,7 @@ class RPGInventory(commands.Cog):
         data = rpg_load_data()
         user_id = str(target.id)
         if user_id not in data:
-            await interaction.response.send_message("User doesn't have a character.", ephemeral=True)
+            await interaction.response.send_message("You don't have a character.", ephemeral=True)
             return
 
         user_record = data.get(user_id, {"current_hp": 0, "stats": {}, "max_hp": 0, "gender": None, "class": None})

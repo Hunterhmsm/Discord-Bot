@@ -1,7 +1,8 @@
-from globals import DATA_FILE, RPG_INVENTORY_FILE, RPG_ITEMS_FILE, RPG_PARTIES_FILE
+from globals import DATA_FILE, RPG_INVENTORY_FILE, RPG_ITEMS_FILE, GRAVEYARD_FILE
 import os
 import json
-import random
+from typing import Optional
+import datetime
 
 
 def rpg_load_data():
@@ -229,7 +230,7 @@ def calculate_starting_hp_mana_stamina(user_id: str) -> tuple:
 
 # function to full heal
 def full_heal(user_id: str) -> tuple:
-    data = rpg_load_data()  #
+    data = rpg_load_data()
     if user_id not in data:
         # if there's no character data just do whatever
         return 0, 0, 0
@@ -247,6 +248,7 @@ def full_heal(user_id: str) -> tuple:
     rpg_save_data(data)
 
     return maxhp, maxmana, maxstamina
+
 
 
 def check_user_in_party(user_id: str, check_is_leader: bool = False) -> bool:
@@ -272,3 +274,50 @@ def get_party_data(user_id: str) -> dict:
 def roll_d12():
     """Roll a d12 and return the result."""
     return random.randint(1, 12)
+
+#defining backup here since i dont think its needed anywheres else
+BACKUP_FILE = "rpgbackup.json"
+def add_to_graveyard(user_id: str, enemy: Optional[str] = None):
+    #open the graveyard file or default
+    if os.path.exists(GRAVEYARD_FILE):
+        with open(GRAVEYARD_FILE, "r") as f:
+            try:
+                graveyard = json.load(f)
+            except json.JSONDecodeError:
+                graveyard = []
+    else:
+        graveyard = []
+    #load user data and get killer, default to unknown
+    data = rpg_load_data()
+    killer = enemy
+    if enemy is None:
+        killer = "Unknown"
+    character = data[user_id]
+    level = character["level"]
+    name = character["name"]
+    #setup the entry
+    entry = f"Level [{level}], {name} was killed by {killer}."
+    graveyard.append(entry)
+    with open(GRAVEYARD_FILE, "w") as f:
+        json.dump(graveyard, f, indent=4)
+
+    #backup the entire character incase of bugs so we can restore :D
+    backup_entry = {
+        "user_id": user_id,
+        "timestamp": datetime.datetime.utcnow().isoformat(),
+        "character": character
+    }
+    
+    if os.path.exists(BACKUP_FILE):
+        with open(BACKUP_FILE, "r") as f:
+            try:
+                backup_data = json.load(f)
+            except json.JSONDecodeError:
+                backup_data = []
+    else:
+        backup_data = []
+    backup_data.append(backup_entry)
+    with open(BACKUP_FILE, "w") as f:
+        json.dump(backup_data, f, indent=4)
+    
+
