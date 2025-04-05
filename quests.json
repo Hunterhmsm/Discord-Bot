@@ -1,0 +1,83 @@
+{
+  "quests": [
+    {
+      "id": 1,
+      "name": "The Lost Sword",
+      "description": "Find the legendary sword lost in the Forest of Shadows.",
+      "requirements": {
+        "level": 3,
+        "items": [],
+        "prerequisite_quests": []
+      },
+      "objectives": [
+        {
+          "type": "explore",
+          "location": "Forest of Shadows",
+          "progress": 0,
+          "target": 1
+        },
+        {
+          "type": "collect",
+          "item": "Ancient Sword",
+          "progress": 0,
+          "target": 1
+        }
+      ],
+      "rewards": {
+        "xp": 300,
+        "gold": 150,
+        "items": ["Ancient Sword"]
+      },
+      "status": "not_started"
+    },
+    {
+      "id": 2,
+      "name": "Wolf Hunt",
+      "description": "Eliminate 5 wild wolves terrorizing the village.",
+      "requirements": {
+        "level": 2,
+        "items": [],
+        "prerequisite_quests": []
+      },
+      "objectives": [
+        {
+          "type": "kill",
+          "enemy": "Wild Wolf",
+          "progress": 0,
+          "target": 5
+        }
+      ],
+      "rewards": {
+        "xp": 150,
+        "gold": 100,
+        "items": ["Wolf Pelt"]
+      },
+      "status": "not_started"
+    },
+    {
+      "id": 3,
+      "name": "Potion Delivery",
+      "description": "Deliver the healing potion to the injured knight in the eastern tower.",
+      "requirements": {
+        "level": 1,
+        "items": ["Healing Potion"],
+        "prerequisite_quests": []
+      },
+      "objectives": [
+        {
+          "type": "deliver",
+          "item": "Healing Potion",
+          "location": "Eastern Tower",
+          "progress": 0,
+          "target": 1
+        }
+      ],
+      "rewards": {
+        "xp": 100,
+        "gold": 50,
+        "items": []
+      },
+      "status": "not_started"
+    }
+  ]
+}
