@@ -1,8 +1,9 @@
-from globals import DATA_FILE, RPG_INVENTORY_FILE, RPG_ITEMS_FILE, GRAVEYARD_FILE
+from globals import DATA_FILE, RPG_INVENTORY_FILE, RPG_ITEMS_FILE, GRAVEYARD_FILE, QUESTS
 import os
 import json
 from typing import Optional
 import datetime
+import random
 
 def rpg_load_data():
     if not os.path.exists(DATA_FILE):
@@ -92,7 +93,8 @@ def calculate_equipment_bonuses(equipment: dict, items_data: dict) -> dict:
 def update_equipment_bonuses_for_user(user_id: str) -> dict:
     data = rpg_load_data()  # Load all data
     if user_id not in data:
-        return {key: 0 for key in ["Strength", "Dexterity", "Intelligence", "Willpower", "Fortitude", "Charisma", "Armor", "Speed", "HP", "Mana", "Stamina"]}
+        return {key: 0 for key in ["Strength", "Dexterity", "Intelligence", "Willpower", "Fortitude", "Charisma",
+                                   "Armor", "Speed", "HP", "Mana", "Stamina"]}
     
     character = data[user_id]
     equipment = character.get("equipment", {})
@@ -210,6 +212,32 @@ def full_heal(user_id: str) -> tuple:
 
 #defining backup here since i dont think its needed anywheres else
 BACKUP_FILE = "rpgbackup.json"
+
+
+# add quests to player rpg, should should eventually be called every 24 hrs
+def add_daily_quests(user_id: str) -> dict: # from string to dictionary
+    data = rpg_load_data() # grabs the data from the rpg load data function
+    # gets it from function above from Globals -> rpgitems.json
+    character = data[user_id] # character = data[user_id]
+
+    try:
+        with open(QUESTS, "r") as f:
+            quest_data = json.load(f)
+            all_quests = quest_data.get("quests", []) # gets all the quests from quests.json -> enters the quests.json
+            # with [] because its layered in an array to access subvalues like, id, description, etc.
+
+            daily_quests = random.sample(all_quests, 3)  # full quest objects
+            # we use random.sample to make sure its unique, change 3 to len of quests
+            character["daily_quests"] = daily_quests # set "daily_quests" to character
+
+            rpg_save_data(data) # save the data to rpg.json
+            return character["daily_quests"] # return the character daily quests
+
+    except Exception as e: # error handling exceptions
+        print(f"Error daily user quests: {e}")
+        return {}
+
+
 def add_to_graveyard(user_id: str, enemy: Optional[str] = None):
     #open the graveyard file or default
     if os.path.exists(GRAVEYARD_FILE):
