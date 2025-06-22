@@ -377,6 +377,7 @@ class RPGInventory(commands.Cog):
         max_mana = character["max_mana"]
         speed = character["speed"]
         armor = character["armor"]
+        experience = character["experience"]
 
         #extract individual stats with fallback values.
         strength = stats.get("Strength", 0)
@@ -440,7 +441,12 @@ class RPGInventory(commands.Cog):
             value=f"{armor} Armor",
             inline=True
         )
-    
+        embed.add_field(
+            name="Experience",
+            value=f"{experience} Experience",
+            inline=True
+        )
+        embed.add_field(name="\u200B", value="\u200B", inline=True)
         await interaction.response.send_message(embed=embed)
 
     @app_commands.guilds(discord.Object(id=GUILD_ID))

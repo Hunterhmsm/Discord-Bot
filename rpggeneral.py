@@ -3,7 +3,7 @@ from discord import app_commands, Interaction
 from discord.ext import commands
 from typing import Optional
 from globals import RPG_INVENTORY_FILE, GUILD_ID, GRAVEYARD_FILE
-from rpgutils import rpg_load_data, rpg_save_data, full_heal
+from rpgutils import rpg_load_data, rpg_save_data, full_heal, is_user_in_combat
 import json
 import os
 
@@ -16,6 +16,8 @@ class RPGGeneral(commands.Cog):
     @app_commands.command(name="rest", description="Rest at the Inn for 50 gold.")
     async def portfolio(self, interaction: discord.Interaction):
         user_id = str(interaction.user.id)
+        if is_user_in_combat(str(user_id)):
+            return await interaction.response.send_message("You cannot rest at the inn in combat.", ephemeral=True)
         data = rpg_load_data()
         if user_id not in data:
             await interaction.response.send_message("You don't have a character.", ephemeral=True)

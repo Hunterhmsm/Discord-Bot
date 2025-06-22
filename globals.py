@@ -24,4 +24,6 @@ RPG_INVENTORY_FILE = "rpg.json"
 RPG_ITEMS_FILE = "rpgitems.json"
 RPG_PARTIES_FILE = "rpgparties.json"
 GRAVEYARD_FILE = "rpggraveyard.json"
+COMBATS_FILE = "activecombats.json"
+ENEMIES_FILE = "enemies.json"
 

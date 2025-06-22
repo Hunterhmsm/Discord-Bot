@@ -6,7 +6,7 @@ import os
 import datetime
 import asyncio
 from globals import RPG_PARTIES_FILE, GUILD_ID
-from rpgutils import rpg_load_data, rpg_save_data
+from rpgutils import rpg_load_data, rpg_save_data, is_user_in_combat
 
 #levels dictionary for easy access
 levels = {
@@ -140,6 +140,8 @@ class LevelCog(commands.Cog):
     async def levelup(self, interaction: discord.Interaction):
         data = rpg_load_data()
         user_id = str(interaction.user.id)
+        if is_user_in_combat(str(user_id)):
+            return await interaction.response.send_message("You cannot level up in combat.", ephemeral=True)
         if user_id not in data:
             await interaction.response.send_message("You don't have a character.", ephemeral=True)
             return
@@ -152,7 +154,8 @@ class LevelCog(commands.Cog):
 
         #see if they can level up
         if experience < levels[current_level]:
-            await interaction.response.send_message("You do not have enough experience to level up.")
+            nextlvl = levels[current_level] - experience
+            await interaction.response.send_message(f"You need {nextlvl} XP to reach the next level.")
             return
         else:
 

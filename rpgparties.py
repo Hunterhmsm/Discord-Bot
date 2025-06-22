@@ -6,7 +6,7 @@ import os
 import datetime
 import asyncio
 from globals import RPG_PARTIES_FILE, GUILD_ID
-from rpgutils import rpg_load_data, rpg_save_data
+from rpgutils import rpg_load_data, rpg_save_data, is_user_in_combat
 
 def load_parties():
     if not os.path.exists(RPG_PARTIES_FILE):
@@ -221,6 +221,8 @@ class PartyCog(commands.Cog):
     @app_commands.command(name="party", description="Manage your party: Create, Invite, Leave, or view your current party.")
     async def party(self, interaction: discord.Interaction):
         user_id = str(interaction.user.id)
+        if is_user_in_combat(str(user_id)):
+            return await interaction.response.send_message("You cannot manage parties in combat.", ephemeral=True)
         parties = load_parties()
         user_party = None
         for pid, party in parties.items():

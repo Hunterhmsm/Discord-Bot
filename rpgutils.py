@@ -252,4 +252,21 @@ def add_to_graveyard(user_id: str, enemy: Optional[str] = None):
     backup_data.append(backup_entry)
     with open(BACKUP_FILE, "w") as f:
         json.dump(backup_data, f, indent=4)
-    
+    data = rpg_load_data()
+    if user_id in data:
+        del data[user_id]
+        rpg_save_data(data)
+        
+
+
+def is_user_in_combat(user_id: str) -> bool:
+    """
+    Check if a user is currently in any active combat.
+    Returns True if they’re in the friendly_frontline or friendly_backline
+    of any CombatScene in combat_scenes, False otherwise.
+    """
+    from rpgcombat import combat_scenes
+    for scene in combat_scenes.values():
+        if user_id in scene.friendly_frontline or user_id in scene.friendly_backline:
+            return True
+    return False
