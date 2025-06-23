@@ -211,6 +211,7 @@ def full_heal(user_id: str) -> tuple:
 #defining backup here since i dont think its needed anywheres else
 BACKUP_FILE = "rpgbackup.json"
 def add_to_graveyard(user_id: str, enemy: Optional[str] = None):
+    from rpgparties import load_parties, save_parties
     #open the graveyard file or default
     if os.path.exists(GRAVEYARD_FILE):
         with open(GRAVEYARD_FILE, "r") as f:
@@ -256,7 +257,18 @@ def add_to_graveyard(user_id: str, enemy: Optional[str] = None):
     if user_id in data:
         del data[user_id]
         rpg_save_data(data)
-        
+    parties = load_parties()
+    for party_id, party in list(parties.items()):
+        if user_id in party.get("members", []):
+            party["members"].remove(user_id)
+            # If the leader died, remove leadership or disband the party
+            if party.get("leader") == user_id:
+                if party["members"]:
+                    party["leader"] = party["members"][0]  # Promote first member
+                else:
+                    del parties[party_id]  # Disband if no one left
+
+            
 
 
 def is_user_in_combat(user_id: str) -> bool:
@@ -270,3 +282,22 @@ def is_user_in_combat(user_id: str) -> bool:
         if user_id in scene.friendly_frontline or user_id in scene.friendly_backline:
             return True
     return False
+
+def apply_damage_modifiers(scene, target_uid, base_damage, dmg_type):
+    """
+    Applies vulnerability, resistance, or invulnerability modifiers
+    and returns the adjusted damage.
+    """
+    # Get character data (either player or enemy)
+    data = scene.enemies_data.get(target_uid) or rpg_load_data().get(target_uid, {})
+    invuln = data.get("invulnerable", [])
+    resist = data.get("resistant", [])
+    vulner = data.get("vulnerable", [])
+
+    if dmg_type in invuln:
+        return 0
+    elif dmg_type in resist:
+        return base_damage // 2
+    elif dmg_type in vulner:
+        return base_damage * 2
+    return base_damage

@@ -10,7 +10,7 @@ import importlib
 from rpgai import resolve_ai
 
 from globals import GUILD_ID, COMBATS_FILE, ENEMIES_FILE, RPG_ITEMS_FILE
-from rpgutils import rpg_load_data, rpg_save_data, add_to_graveyard
+from rpgutils import rpg_load_data, rpg_save_data, add_to_graveyard, apply_damage_modifiers
 from rpgparties import load_parties
 import rpgskills
 import asyncio
@@ -37,6 +37,7 @@ class CombatScene:
             self.graveyard_enemy = data.get('graveyard_enemy', [])
             self.cooldowns = data.get('cooldowns', {})
             self.conditions = data.get('conditions', {})
+            self.log = data.get('log', []) if data else []
 
         else:
             self.friendly_frontline = []
@@ -74,6 +75,7 @@ class CombatScene:
             'graveyard_enemy': self.graveyard_enemy,
             'cooldowns': self.cooldowns,
             'conditions': self.conditions,
+            'log': self.log,
         }
 
 # Persistence helpers
@@ -222,21 +224,23 @@ class CombatView(View):
 
     async def _auto_enemy_turns(self, message: discord.Message):
         """Run all consecutive enemy turns before returning control to the player."""
-        from rpgai import resolve_ai
 
         scene = combat_scenes[self.combat_id]
 
-        # If the first actor isn't an enemy, nothing to do
+        # Run enemy turns in sequence
         while scene.turn_order and scene.turn_order[scene.current_turn_index].startswith("enemy_"):
             uid = scene.turn_order[scene.current_turn_index]
+            tick_effects(scene, lambda msg: scene.log.append(msg))
+            await message.edit(embed=build_embed(scene), view=self)
+
             outcome = resolve_ai(scene, uid)
             if not outcome:
                 break
 
             result, _ = outcome
             save_combats()
-            # post the enemy action
-            await message.channel.send(result)
+            scene.log.append(result)
+            await message.edit(embed=build_embed(scene), view=self)
 
             # death check
             wiped = check_deaths(scene)
@@ -244,18 +248,23 @@ class CombatView(View):
                 await self._end_combat_from_message(message, wiped == "players")
                 return
 
-            # advance turn
+            # advance to next turn
             scene.current_turn_index = (scene.current_turn_index + 1) % len(scene.turn_order)
             scene.actions_used.setdefault(
                 scene.turn_order[scene.current_turn_index],
                 {"action": False, "side_action": False}
             )
             save_combats()
-            # update the embed/view
-            self.main_action.refresh_options()
-            self.side_action.refresh_options()
             await message.edit(embed=build_embed(scene), view=self)
 
+
+        # ——— PATCH: Refresh controls for player after enemies finish ———
+        if scene.turn_order:
+            current_uid = scene.turn_order[scene.current_turn_index]
+            if not current_uid.startswith("enemy_"):
+                self.main_action.refresh_options()
+                self.side_action.refresh_options()
+                await message.edit(embed=build_embed(scene), view=self)
         # once you break out, it is now a player’s turn
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
@@ -331,7 +340,8 @@ class CombatView(View):
             stat_key   = raw_stat.capitalize()
             stat_value = char.get('stats', {}).get(stat_key, 0)
             bonus      = stat_value // 2
-
+            if 'dazed' in scene.conditions.get(uid, {}):
+                bonus -= 2
             # 4) Roll attack
             roll  = random.randint(1, 10)
             total = roll + bonus
@@ -345,8 +355,11 @@ class CombatView(View):
                 dmg_min = weapon.get('damage', {}).get('min', 1)
                 dmg_max = weapon.get('damage', {}).get('max', 1)
                 dmg     = random.randint(dmg_min, dmg_max)
-                scene.hp_map[tgt] -= dmg
-                res += f"Hit! {dmg} damage."
+                dmg_type = weapon.get('type', 'bludgeoning')  # Default to bludgeoning if unspecified
+                final_dmg = apply_damage_modifiers(scene, tgt, dmg, dmg_type)
+                scene.hp_map[tgt] -= final_dmg
+                scene.hp_map[tgt] = max(scene.hp_map[tgt], 0)
+                res += f"Hit! {final_dmg} {dmg_type} damage."
             else:
                 res += "Miss!"
 
@@ -375,7 +388,8 @@ class CombatView(View):
                 # final embed + message
                 await interaction.message.edit(embed=build_embed(scene), view=None)
                 msg = f"Combat ended! +{xp_each} XP" if players_alive else "Your party has fallen…"
-                await interaction.channel.send(msg)
+                scene.log.append(result)
+                await interaction.message.edit(embed=build_embed(scene), view=self)
                 # cleanup
                 del combat_scenes[cid]
                 save_combats()
@@ -395,7 +409,8 @@ class CombatView(View):
                     rpg_save_data(chars)
                 await interaction.message.edit(embed=build_embed(scene), view=None)
                 msg = f"Combat ended! +{xp_each} XP" if players_alive else "Your party has fallen…"
-                await interaction.channel.send(msg)
+                scene.log.append(side_result)
+                await interaction.message.edit(embed=build_embed(scene), view=self)
                 del combat_scenes[cid]
                 save_combats()
                 return
@@ -408,19 +423,28 @@ class CombatView(View):
                 await interaction.channel.send(side_result)
 
         # ——— ADVANCE TURN ———
+        scene.actions_used[uid] = {'action': False, 'side_action': False}
+
+        # Tick conditions and cooldowns
+        tick_effects(scene, lambda msg: scene.log.append(msg))
+        await interaction.message.edit(embed=build_embed(scene), view=self)
+
+        # Advance to next turn
         scene.current_turn_index = (scene.current_turn_index + 1) % len(scene.turn_order)
-        tick_effects(scene, lambda msg: asyncio.create_task(interaction.channel.send(msg)))
+
+        # Set/reset action flags
         scene.actions_used.setdefault(
             scene.turn_order[scene.current_turn_index],
             {'action': False, 'side_action': False}
         )
-        scene.actions_used[uid] = {'action': False, 'side_action': False}
 
+        # Refresh options
+        current_uid = scene.turn_order[scene.current_turn_index]
+        self.main_action.refresh_options()
+        self.side_action.refresh_options()
         save_combats()
         await interaction.message.edit(embed=build_embed(scene), view=self)
 
-        # ——— AUTOMATED ENEMY TURNS ———
-        from rpgai import resolve_ai
 
         # ─── AUTOMATED ENEMY TURNS via centralized AI ───
         while True:
@@ -434,7 +458,8 @@ class CombatView(View):
 
             result, target = outcome
             save_combats()
-            await interaction.channel.send(result)
+            scene.log.append(result)
+            await interaction.message.edit(embed=build_embed(scene), view=self)
 
             # Check for deaths right after each enemy
             wiped = check_deaths(scene)
@@ -541,18 +566,6 @@ class MainActionSelect(Select):
         scene = combat_scenes[self.view.combat_id]
         current = scene.turn_order[scene.current_turn_index]
 
-        # Skip if current turn is an enemy
-        if current.startswith("enemy_"):
-            self.disabled = True
-            self.options.append(
-                discord.SelectOption(
-                    label='— enemy turn —',
-                    value='none',
-                    description='Waiting for player'
-                )
-            )
-            return
-
         self.disabled = False
         self.options.append(discord.SelectOption(label='Attack', value='attack'))
         self.options.append(discord.SelectOption(label='Move', value='move'))
@@ -565,8 +578,7 @@ class MainActionSelect(Select):
 
 
     async def callback(self, interaction: discord.Interaction):
-        if not self.options:
-            self.refresh_options()
+        self.refresh_options()
 
         choice = self.values[0]
         scene = combat_scenes[self.view.combat_id]
@@ -591,57 +603,34 @@ class MainActionSelect(Select):
 
 
 
+
 class SideActionSelect(Select):
     def __init__(self):
-        super().__init__(
-            placeholder='Side Action',
-            min_values=1,
-            max_values=1,
-            options=[]
-        )
-        # Will flip to True if no side actions exist
+        super().__init__(placeholder='Side Action', min_values=1, max_values=1, options=[])
         self.disabled = False
 
     def refresh_options(self):
         self.options.clear()
-
         scene = combat_scenes[self.view.combat_id]
         current = scene.turn_order[scene.current_turn_index]
 
-        # Skip if current turn is an enemy
-        if current.startswith("enemy_"):
-            self.disabled = True
-            self.options.append(
-                discord.SelectOption(
-                    label='— enemies have no side actions —',
-                    value='none',
-                    description='Waiting for player turn'
-                )
-            )
-            return
-
-        char = rpg_load_data().get(current, {})
-        skills = char.get('sideaction_skills', [])
-
+        self.disabled = False
         self.options.append(discord.SelectOption(
             label="— No Action —",
             value="none",
             description="Skip side action this turn"
         ))
 
-        if skills:
-            self.disabled = False
-            for sk in skills:
-                func_name = sk.lower().replace(' ', '_')
-                label = sk.title()
-                self.options.append(
-                    discord.SelectOption(label=label, value=func_name)
-                )
-        else:
-            self.disabled = False
+        char = rpg_load_data().get(current, {})
+        for sk in char.get('sideaction_skills', []):
+            func_name = sk.lower().replace(' ', '_')
+            label = sk.title()
+            self.options.append(discord.SelectOption(label=label, value=func_name))
 
 
     async def callback(self, interaction: discord.Interaction):
+        self.refresh_options()
+
         choice = self.values[0]
         scene = combat_scenes[self.view.combat_id]
         current = scene.turn_order[scene.current_turn_index]
@@ -649,7 +638,6 @@ class SideActionSelect(Select):
         if choice == 'none':
             self.view.pending_side = None
         else:
-            # Check cooldown
             cooldowns = scene.cooldowns.get(current, {})
             if choice in cooldowns:
                 await interaction.response.send_message(
@@ -661,8 +649,6 @@ class SideActionSelect(Select):
             self.view.pending_side = choice
 
         await interaction.response.defer()
-
-
 
 
 class TargetSelect(Select):
@@ -815,6 +801,9 @@ def build_embed(scene):
         value="\n".join(order_lines) if order_lines else "None",
         inline=False
     )
+    if scene.log:
+        log_text = "\n".join(scene.log[-10:])  # Show last 5 lines
+        embed.add_field(name="Recent Actions", value=log_text, inline=False)
     return embed
 
 

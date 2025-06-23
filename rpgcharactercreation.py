@@ -112,7 +112,10 @@ class EquipmentSelectView(discord.ui.View):
                 "necklace": "None",
                 "mainhand": "Iron Longsword",
                 "offhand": "Iron Longsword"
-            }))
+            },
+            action_skills=["Cleave"],
+            sideaction_skills=["Rend"]
+            ))
             self.add_item(EquipmentButton("Option 2: Iron Armor, Mace, and Shield", {
                 "head": "Iron Helmet",
                 "chest": "Iron Breastplate",
@@ -122,9 +125,12 @@ class EquipmentSelectView(discord.ui.View):
                 "ring": "None",
                 "bracelet": "None",
                 "necklace": "None",
-                "mainhand": "Mace",
+                "mainhand": "Iron Mace",
                 "offhand": "Wooden Shield"
-            }))
+            },
+            action_skills=["Power Strike"],
+            sideaction_skills=["Shield Bash"]
+            ))
         elif char_class == "Rogue":
             self.add_item(EquipmentButton("Option: Leather Armor & Dagger", {
                 "head": "None",
@@ -167,15 +173,19 @@ class EquipmentSelectView(discord.ui.View):
         return embed
 
 class EquipmentButton(discord.ui.Button):
-    def __init__(self, label: str, equipment: dict):
+    def __init__(self, label: str, equipment: dict, action_skills=None, sideaction_skills=None):        
         super().__init__(label=label, style=discord.ButtonStyle.primary)
         self.equipment = equipment
+        self.action_skills = action_skills or []
+        self.sideaction_skills = sideaction_skills or []
 
     async def callback(self, interaction: discord.Interaction):
         view: EquipmentSelectView = self.view
         view.selected_equipment = self.equipment
         # Save the chosen equipment in the root character creation view.
         view.root_view.character["equipment"] = self.equipment
+        view.root_view.character["action_skills"] = self.action_skills
+        view.root_view.character["sideaction_skills"] = self.sideaction_skills
         await interaction.response.send_message("Equipment selected!", ephemeral=True)
         # Proceed to the stat distribution step.
         stat_view = StatDistributionView(root_view=view.root_view)
