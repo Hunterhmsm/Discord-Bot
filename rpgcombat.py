@@ -37,7 +37,7 @@ class CombatScene:
             self.graveyard_enemy = data.get('graveyard_enemy', [])
             self.cooldowns = data.get('cooldowns', {})
             self.conditions = data.get('conditions', {})
-            self.log = data.get('log', []) if data else []
+            self.log = data.get('log', [])
 
         else:
             self.friendly_frontline = []
@@ -56,6 +56,8 @@ class CombatScene:
             self.graveyard_enemy = []
             self.cooldowns = {}  # key: uid, value: dict {skill: turns left}
             self.conditions = {}  # key: uid, value: dict {condition: turns left
+            self.log = []
+
 
     def to_dict(self):
         return {
@@ -320,7 +322,8 @@ class CombatView(View):
                 scene.actions_used[uid]['action'] = True
             else:
                 result = "Move action failed. You were not found in either line."
-            await interaction.response.send_message(result, ephemeral=True)
+            scene.log.append(result)
+            await interaction.response.edit_message(embed=build_embed(scene), view=self)
         elif action == 'attack' and tgt:
             # 1) Recalc stats with equipment bonuses
             from rpgutils import update_equipment_bonuses_for_user
@@ -363,8 +366,6 @@ class CombatView(View):
             else:
                 res += "Miss!"
 
-            await interaction.response.send_message(res)
-
             # 6) Check for deaths immediately
             wiped = check_deaths(scene)
             if wiped:
@@ -388,7 +389,7 @@ class CombatView(View):
                 # final embed + message
                 await interaction.message.edit(embed=build_embed(scene), view=None)
                 msg = f"Combat ended! +{xp_each} XP" if players_alive else "Your party has fallen…"
-                scene.log.append(result)
+                scene.log.append(res)
                 await interaction.message.edit(embed=build_embed(scene), view=self)
                 # cleanup
                 del combat_scenes[cid]
@@ -409,7 +410,8 @@ class CombatView(View):
                     rpg_save_data(chars)
                 await interaction.message.edit(embed=build_embed(scene), view=None)
                 msg = f"Combat ended! +{xp_each} XP" if players_alive else "Your party has fallen…"
-                scene.log.append(side_result)
+                if 'side_result' in locals() and side_result:
+                    scene.log.append(side_result)
                 await interaction.message.edit(embed=build_embed(scene), view=self)
                 del combat_scenes[cid]
                 save_combats()
@@ -420,7 +422,8 @@ class CombatView(View):
                 await interaction.channel.send("No side-action target selected.")
             else:
                 side_result = await self.resolve_side_action(interaction)
-                await interaction.channel.send(side_result)
+                scene.log.append(side_result)
+                await interaction.response.edit_message(embed=build_embed(scene), view=self)
 
         # ——— ADVANCE TURN ———
         scene.actions_used[uid] = {'action': False, 'side_action': False}
