@@ -9,7 +9,7 @@ import asyncio
 from typing import Optional
 import datetime
 from zoneinfo import ZoneInfo
-from globals import TOKEN, GUILD_ID, DATA_FILE, ALLOWED_ROLES, STOCK_FILE, STOCK_HISTORY_FILE, UPDATE_INTERVAL_MINUTES, LOTTERY_FILE, AFK_CHANNEL_ID
+from globals import TOKEN, GUILD_ID, TARGET_USER_ID, DATA_FILE, ALLOWED_ROLES, STOCK_FILE, STOCK_HISTORY_FILE, UPDATE_INTERVAL_MINUTES, LOTTERY_FILE, AFK_CHANNEL_ID
 from stocks import load_stocks
 from utils import save_data, load_data
 
@@ -188,11 +188,11 @@ def save_created_roles(roles_set):
 # Load created roles on startup
 created_roles = load_created_roles()
 
-@bot.tree.command(name="create_role", description="Create a new role that users can join (Requires 'huh' role)", guild=discord.Object(id=GUILD_ID))
+@bot.tree.command(name="create_role", description="Create a new role that users can join (Restricted command)", guild=discord.Object(id=GUILD_ID))
 @app_commands.describe(rolename="The name of the role to create")
 async def create_role(interaction: discord.Interaction, rolename: str):
-    # Check if the invoking user has the "huh" role (case-insensitive)
-    if not any(role.name.lower() == "huh" for role in interaction.user.roles):
+    # Check if the invoking user is the target user
+    if interaction.user.id != TARGET_USER_ID:
         await interaction.response.send_message("You do not have permission to use this command.", ephemeral=True)
         return
     
