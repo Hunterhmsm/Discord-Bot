@@ -9,7 +9,7 @@ import asyncio
 from typing import Optional
 import datetime
 from zoneinfo import ZoneInfo
-from globals import TOKEN, GUILD_ID, TARGET_MEMBER_ID, TARGET_USER_ID, DATA_FILE, ALLOWED_ROLES, STOCK_FILE, STOCK_HISTORY_FILE, UPDATE_INTERVAL_MINUTES, LOTTERY_FILE, AFK_CHANNEL_ID
+from globals import TOKEN, GUILD_ID, DATA_FILE, ALLOWED_ROLES, STOCK_FILE, STOCK_HISTORY_FILE, UPDATE_INTERVAL_MINUTES, LOTTERY_FILE, AFK_CHANNEL_ID
 from stocks import load_stocks
 from utils import save_data, load_data
 
@@ -74,19 +74,6 @@ async def on_voice_state_update(member, before, after):
 
     def non_bot_members(channel):
         return [m for m in channel.members if not m.bot]
-
-    # -- Notification for target user --
-    if member.id == TARGET_USER_ID:
-        if before.channel is None and after.channel is not None:
-            notif_channel = discord.utils.get(member.guild.text_channels, name="notif")
-            if notif_channel is None:
-                print("Channel #notif not found.")
-            else:
-                role = discord.utils.get(member.guild.roles, name="notif")
-                if role is None:
-                    print("Role 'notif' not found.")
-                else:
-                    await notif_channel.send(f"{role.mention} Alert: {member.mention} has joined a voice channel!")
 
     #determine if the channel is the AFK channel.
     def is_afk(channel):
@@ -174,38 +161,82 @@ async def on_voice_state_update(member, before, after):
                         s["alone_accumulated"] += delta
                         s["last_alone_update"] = None
 
-# --- Join/Leave Notification Commands ---
-@bot.tree.command(name="joinnotification", description="Join the notif notifications", guild=discord.Object(id=GUILD_ID))
-async def joinnotification(interaction: discord.Interaction):
-    role = discord.utils.get(interaction.guild.roles, name="notif")
-    if role is None:
-        await interaction.response.send_message("The role 'notif' does not exist.", ephemeral=True)
-        return
-    member = interaction.user
-    if role in member.roles:
-        await interaction.response.send_message("You already have the 'notif' role.", ephemeral=True)
-    else:
-        try:
-            await member.add_roles(role)
-            await interaction.response.send_message("You have been given the 'notif' role.", ephemeral=True)
-        except Exception:
-            await interaction.response.send_message("Error assigning the role.", ephemeral=True)
 
-@bot.tree.command(name="leavenotification", description="Leave the notif notifications", guild=discord.Object(id=GUILD_ID))
-async def leavenotification(interaction: discord.Interaction):
-    role = discord.utils.get(interaction.guild.roles, name="notif")
-    if role is None:
-        await interaction.response.send_message("The role 'notif' does not exist.", ephemeral=True)
+
+# --- Custom Role Management ---
+CREATED_ROLES_FILE = "created_roles.json"
+
+def load_created_roles():
+    """Load created roles from JSON file"""
+    try:
+        if os.path.exists(CREATED_ROLES_FILE):
+            with open(CREATED_ROLES_FILE, "r") as f:
+                return set(json.load(f))
+        return set()
+    except Exception as e:
+        print(f"Error loading created roles: {e}")
+        return set()
+
+def save_created_roles(roles_set):
+    """Save created roles to JSON file"""
+    try:
+        with open(CREATED_ROLES_FILE, "w") as f:
+            json.dump(list(roles_set), f, indent=2)
+    except Exception as e:
+        print(f"Error saving created roles: {e}")
+
+# Load created roles on startup
+created_roles = load_created_roles()
+
+@bot.tree.command(name="create_role", description="Create a new role that users can join (Requires 'huh' role)", guild=discord.Object(id=GUILD_ID))
+@app_commands.describe(rolename="The name of the role to create")
+async def create_role(interaction: discord.Interaction, rolename: str):
+    # Check if the invoking user has the "huh" role (case-insensitive)
+    if not any(role.name.lower() == "huh" for role in interaction.user.roles):
+        await interaction.response.send_message("You do not have permission to use this command.", ephemeral=True)
         return
+    
+    # Check if role already exists
+    existing_role = discord.utils.get(interaction.guild.roles, name=rolename)
+    if existing_role:
+        await interaction.response.send_message(f"Role '{rolename}' already exists.", ephemeral=True)
+        return
+    
+    try:
+        # Create the role
+        new_role = await interaction.guild.create_role(name=rolename, mentionable=True)
+        created_roles.add(rolename.lower())  # Store in lowercase for case-insensitive matching
+        save_created_roles(created_roles)  # Save to file
+        await interaction.response.send_message(f"Role '{rolename}' has been created successfully!", ephemeral=True)
+    except Exception as e:
+        await interaction.response.send_message(f"Error creating role: {e}", ephemeral=True)
+
+@bot.tree.command(name="role_join", description="Join a role that was created with /create_role", guild=discord.Object(id=GUILD_ID))
+@app_commands.describe(role="The role to join")
+async def role_join(interaction: discord.Interaction, role: str):
+    # Check if this role was created with /create_role
+    if role.lower() not in created_roles:
+        await interaction.response.send_message("This role was not created with /create_role and cannot be joined.", ephemeral=True)
+        return
+    
+    # Find the actual role object
+    role_obj = discord.utils.get(interaction.guild.roles, name=role)
+    if role_obj is None:
+        # Role was deleted after creation, remove from our tracking
+        created_roles.discard(role.lower())
+        save_created_roles(created_roles)  # Save to file
+        await interaction.response.send_message("This role no longer exists.", ephemeral=True)
+        return
+    
     member = interaction.user
-    if role not in member.roles:
-        await interaction.response.send_message("You don't have the 'notif' role.", ephemeral=True)
+    if role_obj in member.roles:
+        await interaction.response.send_message(f"You already have the '{role}' role.", ephemeral=True)
     else:
         try:
-            await member.remove_roles(role)
-            await interaction.response.send_message("The 'notif' role has been removed.", ephemeral=True)
-        except Exception:
-            await interaction.response.send_message("Error removing the role.", ephemeral=True)
+            await member.add_roles(role_obj)
+            await interaction.response.send_message(f"You have been given the '{role}' role.", ephemeral=True)
+        except Exception as e:
+            await interaction.response.send_message(f"Error assigning the role: {e}", ephemeral=True)
 
 #leaderboard command
 @bot.tree.command(
