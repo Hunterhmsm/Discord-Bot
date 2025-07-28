@@ -18,3 +18,9 @@ rpgitems.json
 rpgparties.json
 rpgbackup.json
 .gitignore
+__pycache__/rpgskills.cpython-311.pyc
+__pycache__/rpgabilities.cpython-311.pyc
+__pycache__/rpgai.cpython-311.pyc
+__pycache__/rpgcombat.cpython-311.pyc
+activecombats.json
+enemies.json
