@@ -119,8 +119,8 @@ def update_stock_prices(current_market_event):
                     change_percent = random.uniform(-0.40, 0.30)
                     new_price = price * (1 + change_percent)
             else:
-                # Normal: Keep it wild! -75% to +200% (unchanged - this is where the real volatility is)
-                change_percent = random.uniform(-0.75, 2.00)
+                # Normal: Toned down but still wild! -60% to +100% (was -75% to +200%)
+                change_percent = random.uniform(-0.60, 1.00)
                 new_price = price * (1 + change_percent)
                 
             # Apply reversion only for extreme cases
