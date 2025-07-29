@@ -73,79 +73,111 @@ def update_stock_prices(current_market_event):
 
     for stock, price in data.items():
         old_price = price
-        #check if the stock symbol contains "COIN"
         is_coin = "COIN" in stock.upper()
 
-        #define the ranges based on whether it's a coin stock or not.
+        # Simple mean reversion - only when prices get extreme
         if is_coin:
-            #for coin stocks:
-            if event_type == "rally":
-                if random.random() < 0.70:
-                    change_percent = random.uniform(0.50, 4.00)  #rally upward: 50% to %400
-                    new_price = price * (1 + change_percent)
-                else:
-                    change_percent = random.uniform(0.005, 0.200)  #normal fluctuation: 0.5% to 200%
-                    if random.random() < 0.5:
-                        change_percent = random.uniform(0.005, 0.95)  #normal fluctuation: 0.5% to 90%
-                        change_percent = -change_percent
-                    new_price = price * (1 + change_percent)
-            elif event_type == "crash":
-                if random.random() < 0.70:
-                    change_percent = random.uniform(0.10, 0.90)  #crash downward: 10% to 90%
-                    new_price = price * (1 - change_percent)
-                else:
-                    change_percent = random.uniform(0.005, 0.95)
-                    if random.random() < 0.5:
-                        change_percent = -change_percent
-                    new_price = price * (1 + change_percent)
+            # For coins: mean revert if price is more than 100x or less than 0.01x the starting value
+            if stock not in history or len(history[stock]) < 5:
+                baseline = 10.0 if stock == "BEANEDCOIN" else 1.0  # rough starting values
             else:
-                #normal update for coin stocks 0.5% to 50% fluctuation.
-                change_percent = random.uniform(0.005, 2.00)
-                if random.random() < 0.5:
-                    change_percent = random.uniform(0.005, .75)
-                    change_percent = -change_percent
-                new_price = price * (1 + change_percent)
+                baseline = history[stock][0]["price"]  # use first recorded price
+            
+            # Only apply reversion for extreme prices
+            reversion_factor = 0
+            if price > baseline * 100:  # Too high
+                reversion_factor = -0.05  # 5% pull down
+            elif price < baseline * 0.01:  # Too low  
+                reversion_factor = 0.10   # 10% pull up
         else:
-            #for non-coin stocks, use the original percentages.
+            # For stocks: mean revert if more than 20x or less than 0.1x starting value
+            if stock not in history or len(history[stock]) < 5:
+                baseline = 300.0 if stock == "INK" else 100.0  # rough starting values
+            else:
+                baseline = history[stock][0]["price"]
+                
+            reversion_factor = 0
+            if price > baseline * 20:  # Too high
+                reversion_factor = -0.03  # 3% pull down
+            elif price < baseline * 0.1:  # Too low
+                reversion_factor = 0.08   # 8% pull up
+
+        if is_coin:
+            # COINS - Toned down event effects but still volatile normally
             if event_type == "rally":
                 if random.random() < 0.70:
-                    change_percent = random.uniform(0.10, 0.20)
+                    change_percent = random.uniform(0.20, 1.00)  # Reduced from 0.50-4.00 to 0.20-1.00 (20-100% gains)
                     new_price = price * (1 + change_percent)
                 else:
-                    change_percent = random.uniform(0.005, 0.05)
-                    if random.random() < 0.5:
-                        change_percent = -change_percent
+                    change_percent = random.uniform(-0.30, 0.50)  # -30% to +50%
                     new_price = price * (1 + change_percent)
             elif event_type == "crash":
                 if random.random() < 0.70:
-                    change_percent = random.uniform(0.10, 0.20)
+                    change_percent = random.uniform(0.15, 0.50)  # Reduced from 0.30-0.85 to 0.15-0.50 (15-50% crash)
                     new_price = price * (1 - change_percent)
                 else:
-                    change_percent = random.uniform(0.005, 0.05)
-                    if random.random() < 0.5:
-                        change_percent = -change_percent
+                    change_percent = random.uniform(-0.40, 0.30)
                     new_price = price * (1 + change_percent)
             else:
+                # Normal: Keep it wild! -75% to +200% (unchanged - this is where the real volatility is)
+                change_percent = random.uniform(-0.75, 2.00)
+                new_price = price * (1 + change_percent)
+                
+            # Apply reversion only for extreme cases
+            new_price = new_price * (1 + reversion_factor)
+            
+            # Set minimum but no maximum for coins
+            new_price = max(round(new_price, 8), 0.00000001)
+            
+        else:
+            # REGULAR STOCKS - Keep decent movement like your original
+            if event_type == "rally":
+                if random.random() < 0.70:
+                    change_percent = random.uniform(0.10, 0.25)  # 10-25% rally
+                    new_price = price * (1 + change_percent)
+                else:
+                    change_percent = random.uniform(-0.05, 0.10)
+                    new_price = price * (1 + change_percent)
+            elif event_type == "crash":
+                if random.random() < 0.70:
+                    change_percent = random.uniform(0.10, 0.25)  # 10-25% crash
+                    new_price = price * (1 - change_percent)
+                else:
+                    change_percent = random.uniform(-0.05, 0.05)
+                    new_price = price * (1 + change_percent)
+            else:
+                # Keep your rare big jumps
                 if random.random() < 0.01:
-                    jump_factor = random.uniform(0.5, 0.95)
+                    jump_factor = random.uniform(0.40, 0.70)  # 40-70% jumps
                     if random.random() < 0.5:
                         new_price = price * (1 + jump_factor)
                     else:
-                        jump_factor = random.uniform(0.5, 0.60)
                         new_price = price * (1 - jump_factor)
                 else:
-                    change_percent = random.uniform(0.005, 0.05)
-                    if random.random() < 0.5:
-                        change_percent = -change_percent
+                    # Normal: -8% to +8% (decent movement)
+                    change_percent = random.uniform(-0.08, 0.08)
                     new_price = price * (1 + change_percent)
+            
+            # Apply reversion for extreme cases
+            new_price = new_price * (1 + reversion_factor)
+            
+            # Set minimum for stocks
+            new_price = max(round(new_price, 2), 0.01)
 
-        new_price = max(round(new_price, 2), 0.01)
-        if is_coin:
-            new_price = max(round(new_price, 8), 0.00000001)
+        # Recovery boost if hitting minimum (prevents death spiral)
+        if (is_coin and new_price <= 0.00000001) or (not is_coin and new_price <= 0.01):
+            boost = random.uniform(0.20, 0.50)  # 20-50% recovery boost
+            new_price = new_price * (1 + boost)
+            if is_coin:
+                new_price = round(new_price, 8)
+            else:
+                new_price = round(new_price, 2)
+
         data[stock] = new_price
-        absolute_change = round(new_price - old_price, 2)
+        absolute_change = round(new_price - old_price, 8 if is_coin else 2)
         percent_change = round(((new_price - old_price) / old_price) * 100, 2) if old_price != 0 else 0
         changes[stock] = {"old": old_price, "new": new_price, "abs": absolute_change, "perc": percent_change}
+        
         if stock not in history:
             history[stock] = []
         history[stock].append({"timestamp": now_iso, "price": new_price})
