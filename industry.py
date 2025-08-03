@@ -54,7 +54,6 @@ class IndustryGroup(commands.Cog):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
         self.store = load_industry_store()
-        # Here the industries JSON is expected to have a top-level "facilities" key.
         self.industries = load_industries()  
         self.production_task = tasks.loop(hours=1)(self.hourly_production)
         self.production_task.start()
@@ -66,57 +65,99 @@ class IndustryGroup(commands.Cog):
         data = load_data()
         for user_id, record in data.items():
             facilities = record.get("facilities", {})
+            inventory = record.get("inventory", {})
+            
             for facility_name, facility_value in facilities.items():
-                #look up facility definition from the combined facilities dictionary.
-                facility_def = None
-                for cat in self.industries.values():
-                    if facility_name in cat:
-                        facility_def = cat[facility_name]
-                        break
+                # Get facility definition from the facilities dict
+                facility_def = self.industries.get("facilities", {}).get(facility_name)
                 if facility_def is None:
                     continue
+                    
                 category = facility_def.get("category", "raw")
+                
                 if category == "oil":
-                    #for oil facilities, facility_value is expected to be a list of oil well objects.
+                    # Oil drilling logic (unchanged)
                     new_wells = []
                     total_extracted = 0
                     for well in facility_value:
                         remaining = well["capacity"] - well["extracted"]
                         if remaining <= 0:
-                            continue  # Well is depleted.
+                            continue
                         extract = min(50, remaining)
                         well["extracted"] += extract
                         total_extracted += extract
                         if well["extracted"] < well["capacity"]:
                             new_wells.append(well)
                     record["facilities"][facility_name] = new_wells
-                    inventory = record.get("inventory", {})
                     inventory["oil"] = inventory.get("oil", 0) + total_extracted
-                    record["inventory"] = inventory
-                else:
-                    #for non-oil facilities, facility_value is expected to be a count.
-                    count = facility_value  
-                    #deermine production amount.
-                    if "production" in facility_def:
-                        prod_info = facility_def["production"]
-                        #if production is a dict, sum the production values.
-                        if isinstance(prod_info, dict):
-                            prod_amount = sum(prod_info.values())
-                        else:
-                            prod_amount = prod_info
+                    
+                elif category == "raw":
+                    # Raw resource production (mines, farms, etc.)
+                    count = facility_value
+                    
+                    # Check if we have enough power for powered production
+                    power_available = inventory.get("power", 0)
+                    power_needed = facility_def.get("power_required", 0) * count
+                    
+                    if power_available >= power_needed and power_needed > 0:
+                        # Use powered production and consume power
+                        prod_range = facility_def.get("powered_prod", facility_def.get("base_prod", [0, 0]))
+                        inventory["power"] = power_available - power_needed
                     else:
-                        base_prod = facility_def.get("base_prod")
-                        prod_amount = sum(base_prod) / 2 if base_prod else 0
-                    produced = prod_amount * count
+                        # Use base production
+                        prod_range = facility_def.get("base_prod", [0, 0])
+                    
+                    # Calculate production per facility
+                    prod_per_facility = random.uniform(prod_range[0], prod_range[1])
+                    total_production = prod_per_facility * count
+                    
+                    # Add to inventory
                     resource = facility_def.get("resource")
                     if resource:
-                        inventory = record.get("inventory", {})
-                        inventory[resource] = inventory.get(resource, 0) + produced
-                        record["inventory"] = inventory
+                        inventory[resource] = inventory.get(resource, 0) + total_production
+                        
+                elif category in ["power", "industry"]:
+                    # Power plants and industry facilities
+                    count = facility_value
+                    
+                    # Check consumption requirements
+                    consumption = facility_def.get("consumption", {})
+                    can_produce = True
+                    
+                    # Check if we have enough of each required resource
+                    for resource, needed_per_facility in consumption.items():
+                        total_needed = needed_per_facility * count
+                        available = inventory.get(resource, 0)
+                        if available < total_needed:
+                            can_produce = False
+                            break
+                    
+                    if can_produce:
+                        # Consume required resources
+                        for resource, needed_per_facility in consumption.items():
+                            total_needed = needed_per_facility * count
+                            inventory[resource] = inventory.get(resource, 0) - total_needed
+                            if inventory[resource] <= 0:
+                                del inventory[resource]
+                        
+                        # Produce outputs
+                        production = facility_def.get("production", {})
+                        if isinstance(production, dict):
+                            # Multiple outputs (like estrogen_lab)
+                            for output_resource, amount_per_facility in production.items():
+                                total_output = amount_per_facility * count
+                                inventory[output_resource] = inventory.get(output_resource, 0) + total_output
+                        else:
+                            # Single output (like coal_power producing just power)
+                            resource = facility_def.get("resource")
+                            if resource:
+                                total_output = production * count
+                                inventory[resource] = inventory.get(resource, 0) + total_output
+
+            record["inventory"] = inventory
             data[user_id] = record
         save_data(data)
         print("Hourly production completed.")
-
 
     async def process_contracts(self):
         contracts = load_contracts()
@@ -292,18 +333,15 @@ class IndustryGroup(commands.Cog):
     @app_commands.describe(facility="The facility you want to build (e.g., soy_farm, coal_mine, sparse_drill, coal_power, estrogen_lab, steelmaker)")
     async def build(self, interaction: discord.Interaction, facility: str):
         facility = facility.lower()
-        # Since our JSON now has a top-level "facilities" key:
-        # Combine all facility definitions from all categories into one dictionary.
-        facilities_data = {}
-        for category in self.industries.values():
-            facilities_data.update(category)
+        # Get facilities from the JSON structure
+        facilities_data = self.industries.get("facilities", {})
         
         if facility not in facilities_data:
             await interaction.response.send_message("Invalid facility.", ephemeral=True)
             return
 
         facility_info = facilities_data[facility]
-        build_price = facility_info.get("cost")  # using "cost" for building price
+        build_price = facility_info.get("cost")
         if build_price is None:
             await interaction.response.send_message("This facility cannot be built.", ephemeral=True)
             return
@@ -364,21 +402,20 @@ class IndustryGroup(commands.Cog):
             await interaction.response.send_message(f"Error loading industries: {e}", ephemeral=True)
             return
 
-        # We expect the industries JSON to have a "facilities" key.
         facilities = industries_json.get("facilities", {})
         if not facilities:
             await interaction.response.send_message("No facilities defined.", ephemeral=True)
             return
 
         embed = discord.Embed(title="Available Facilities", color=discord.Color.green())
-        # Iterate through each facility in the "facilities" section.
         for facility_key, details in facilities.items():
             nice_name = facility_key.replace("_", " ").title()
             field_value = ""
             for key, value in details.items():
-                # If the value is a list (like a production range), join it nicely.
                 if isinstance(value, list):
                     value = " - ".join(map(str, value))
+                elif isinstance(value, dict):
+                    value = ", ".join([f"{k}: {v}" for k, v in value.items()])
                 field_value += f"**{key.capitalize()}**: {value}\n"
             embed.add_field(name=nice_name, value=field_value, inline=False)
         await interaction.response.send_message(embed=embed)
@@ -397,7 +434,6 @@ class IndustryGroup(commands.Cog):
         facilities_owned = record.get("facilities", {})
         inventory = record.get("inventory", {})
 
-        #create an embed for the industry status
         embed = discord.Embed(
             title=f"{target.display_name}'s Industry Status",
             color=discord.Color.green()
@@ -407,41 +443,40 @@ class IndustryGroup(commands.Cog):
             facility_lines = []
             for facility, value in facilities_owned.items():
                 facility_info = self.industries.get("facilities", {}).get(facility, {})
-                description = facility_info.get("description", "No description available.")
                 category = facility_info.get("category", "raw")
                 
                 if category == "oil":
-                    #for oil facilities 'value' is expected to be a list of well objects
                     well_details = []
                     for idx, well in enumerate(value, start=1):
                         capacity = well.get("capacity", 0)
                         extracted = well.get("extracted", 0)
                         remaining = capacity - extracted
-                        well_details.append(f"Well {idx}: Capacity: {capacity}, Extracted: {extracted}, Remaining: {remaining}")
-                    prod_str = "Extracts 50 barrels/hr per well"
+                        well_details.append(f"Well {idx}: {remaining}/{capacity} remaining")
                     facility_line = (
                         f"**{facility.replace('_', ' ').title()}**\n"
-                        f"*{description}*\n"
-                        f"{prod_str}\n"
+                        f"Extracts 50 oil/hr per well\n"
                         f"{chr(10).join(well_details)}"
                     )
                 else:
-                    #for non-oil facilities, 'value' is expected to be a count
                     count = value
-                    if "production" in facility_info:
-                        prod_info = facility_info["production"]
-                        if isinstance(prod_info, dict):
-                            prod_str = ", ".join([f"{k}: {prod_info[k]}/hr" for k in prod_info])
-                        else:
-                            prod_str = f"{prod_info}/hr"
+                    # Production info
+                    prod_info = facility_info.get("production", {})
+                    if isinstance(prod_info, dict):
+                        prod_str = ", ".join([f"{k}: {v}/hr" for k, v in prod_info.items()])
+                    elif prod_info:
+                        resource = facility_info.get("resource", "power")
+                        prod_str = f"{resource}: {prod_info}/hr"
                     else:
-                        base_prod = facility_info.get("base_prod")
-                        prod_str = f"{base_prod[0]} - {base_prod[1]}/hr" if base_prod else "None"
+                        base_prod = facility_info.get("base_prod", [0, 0])
+                        resource = facility_info.get("resource", "unknown")
+                        prod_str = f"{resource}: {base_prod[0]}-{base_prod[1]}/hr"
+                    
+                    # Consumption info
                     cons = facility_info.get("consumption", {})
-                    cons_str = ", ".join([f"{k}: {cons[k]}/hr" for k in cons]) if cons else "None"
+                    cons_str = ", ".join([f"{k}: {v}/hr" for k, v in cons.items()]) if cons else "None"
+                    
                     facility_line = (
                         f"**{facility.replace('_', ' ').title()}** (x{count})\n"
-                        f"*{description}*\n"
                         f"Production: {prod_str}\n"
                         f"Consumption: {cons_str}"
                     )
@@ -451,14 +486,12 @@ class IndustryGroup(commands.Cog):
             embed.add_field(name="Facilities", value="None", inline=False)
 
         if inventory:
-            inv_lines = [f"**{res.capitalize()}**: {qty}" for res, qty in inventory.items()]
+            inv_lines = [f"**{res.capitalize()}**: {qty:.1f}" for res, qty in inventory.items()]
             embed.add_field(name="Resource Inventory", value="\n".join(inv_lines), inline=False)
         else:
             embed.add_field(name="Resource Inventory", value="None", inline=False)
 
         await interaction.response.send_message(embed=embed, ephemeral=True)
-
-
 
     @app_commands.guilds(discord.Object(id=GUILD_ID))
     @app_commands.command(name="industry_invtransfer", description="Transfer a resource from your inventory to another user.")
@@ -523,7 +556,6 @@ class IndustryGroup(commands.Cog):
             return
 
         embed = discord.Embed(title="Industry Store", color=discord.Color.blue())
-        # Format each store item nicely.
         for item_name, details in store_items.items():
             item_text = f"**{item_name.replace('_', ' ').title()}**\n"
             for key, value in details.items():
@@ -543,15 +575,15 @@ class IndustryGroup(commands.Cog):
         industry_key = industry.lower()
         data = load_data()
         user_id = str(interaction.user.id)
-        user_record = data.get(user_id, {"balance": 0, "industries": {}})
-        user_industries = user_record.get("industries", {})
+        user_record = data.get(user_id, {"balance": 0, "facilities": {}})
+        user_facilities = user_record.get("facilities", {})
 
-        if industry_key not in user_industries or user_industries[industry_key] <= 0:
+        if industry_key not in user_facilities or user_facilities[industry_key] <= 0:
             await interaction.response.send_message(f"You do not own any {industry} facilities.", ephemeral=True)
             return
 
         if quantity.lower() == "all":
-            sell_quantity = user_industries[industry_key]
+            sell_quantity = user_facilities[industry_key]
         else:
             try:
                 sell_quantity = float(quantity)
@@ -559,7 +591,7 @@ class IndustryGroup(commands.Cog):
                 await interaction.response.send_message("Invalid quantity format. Please provide a number or 'all'.", ephemeral=True)
                 return
 
-        if sell_quantity <= 0 or sell_quantity > user_industries[industry_key]:
+        if sell_quantity <= 0 or sell_quantity > user_facilities[industry_key]:
             await interaction.response.send_message("You do not own enough facilities to sell that many.", ephemeral=True)
             return
 
@@ -574,23 +606,365 @@ class IndustryGroup(commands.Cog):
             await interaction.response.send_message(f"Industry '{industry}' not found in definitions.", ephemeral=True)
             return
 
-        base_price = facilities_def[industry_key].get("price")
+        base_price = facilities_def[industry_key].get("cost")
         if base_price is None:
             await interaction.response.send_message(f"No price defined for {industry}.", ephemeral=True)
             return
 
         sale_value = 0.5 * base_price * sell_quantity
 
-        user_industries[industry_key] -= sell_quantity
-        if user_industries[industry_key] <= 0:
-            del user_industries[industry_key]
-        user_record["industries"] = user_industries
+        user_facilities[industry_key] -= sell_quantity
+        if user_facilities[industry_key] <= 0:
+            del user_facilities[industry_key]
+        user_record["facilities"] = user_facilities
         user_record["balance"] += sale_value
         data[user_id] = user_record
         save_data(data)
 
         await interaction.response.send_message(f"Successfully sold {sell_quantity} {industry} facility(ies) for {sale_value} Beaned Bucks (half price).", ephemeral=False)
+class DrugMarket:
+    def __init__(self):
+        # Load base prices from drugprice.json
+        self.base_prices = self.load_drug_prices()
+        
+    def load_drug_prices(self):
+        """Load base drug prices from drugprice.json"""
+        try:
+            with open('drugprice.json', 'r') as f:
+                data = json.load(f)
+                # Convert format from {buy_price, sell_price} to {buy, sell}
+                converted = {}
+                for drug, prices in data.items():
+                    converted[drug] = {
+                        "buy": prices["buy_price"],
+                        "sell": prices["sell_price"]
+                    }
+                return converted
+        except:
+            # Fallback to default prices if file doesn't exist
+            return {
+                "marijuana": {"buy": 80, "sell": 40},
+                "coca_leaves": {"buy": 120, "sell": 60},
+                "cannabis_products": {"buy": 800, "sell": 400},
+                "cocaine": {"buy": 1500, "sell": 750}
+            }
+        
+    def get_market_data(self):
+        """Load or create market data"""
+        try:
+            with open('drug_market.json', 'r') as f:
+                return json.load(f)
+        except:
+            # Default market data
+            default_data = {}
+            for drug in self.base_prices:
+                default_data[drug] = {
+                    "sales_3days": [],  # List of [date, quantity] for last 3 days
+                    "price_multiplier": 1.0,
+                    "last_update": datetime.date.today().isoformat()
+                }
+            self.save_market_data(default_data)
+            return default_data
+    
+    def save_market_data(self, data):
+        """Save market data"""
+        with open('drug_market.json', 'w') as f:
+            json.dump(data, f)
+    
+    def clean_old_sales(self, market_data):
+        """Remove sales older than 3 days and update prices"""
+        today = datetime.date.today()
+        three_days_ago = (today - datetime.timedelta(days=3)).isoformat()
+        
+        for drug in market_data:
+            # Clean old sales (keep only last 3 days)
+            market_data[drug]["sales_3days"] = [
+                sale for sale in market_data[drug]["sales_3days"] 
+                if sale[0] > three_days_ago
+            ]
+            
+            # Calculate total sales in last 3 days
+            total_sales = sum(sale[1] for sale in market_data[drug]["sales_3days"])
+            
+            # Get current multiplier
+            current_multiplier = market_data[drug]["price_multiplier"]
+            target_multiplier = 1.0  # Default target
+            
+            # Determine target multiplier based on 3-day sales
+            if total_sales < 50:
+                target_multiplier = 1.5  # +50%
+            elif total_sales < 100:
+                target_multiplier = 1.25  # +25%
+            elif total_sales < 200:
+                target_multiplier = 1.2   # +20%
+            elif total_sales > 800:
+                target_multiplier = 0.5   # -50%
+            elif total_sales > 600:
+                target_multiplier = 0.75  # -25%
+            elif total_sales > 400:
+                target_multiplier = 0.9   # -10%
+            else:
+                target_multiplier = 1.0   # Normal price
+            
+            # Slowly move towards target (adjust by 15% per day max)
+            if current_multiplier < target_multiplier:
+                new_multiplier = min(target_multiplier, current_multiplier + 0.15)
+            elif current_multiplier > target_multiplier:
+                new_multiplier = max(target_multiplier, current_multiplier - 0.15)
+            else:
+                new_multiplier = current_multiplier
+            
+            market_data[drug]["price_multiplier"] = round(new_multiplier, 3)
+            market_data[drug]["last_update"] = today.isoformat()
+        
+        self.save_market_data(market_data)
+        return market_data
+    
+    def record_sale(self, drug, quantity):
+        """Record a drug sale"""
+        if drug not in self.base_prices:
+            return
+            
+        market_data = self.get_market_data()
+        market_data = self.clean_old_sales(market_data)
+        
+        # Add new sale [date, quantity]
+        today = datetime.date.today().isoformat()
+        market_data[drug]["sales_3days"].append([today, quantity])
+        self.save_market_data(market_data)
+    
+    def get_current_prices(self):
+        """Get current drug prices with market adjustments"""
+        market_data = self.get_market_data()
+        market_data = self.clean_old_sales(market_data)
+        
+        current_prices = {}
+        for drug, base in self.base_prices.items():
+            multiplier = market_data[drug]["price_multiplier"]
+            
+            # Calculate total sales in last 3 days
+            total_sales_3days = sum(sale[1] for sale in market_data[drug]["sales_3days"])
+            
+            current_prices[drug] = {
+                "buy_price": int(base["buy"] * multiplier),
+                "sell_price": int(base["sell"] * multiplier),
+                "multiplier": multiplier,
+                "sales_3days": total_sales_3days
+            }
+        
+        return current_prices
 
+# Usage in your sell command:
+drug_market = DrugMarket()
+
+def sell_drugs(user_id, drug, quantity):
+    """Example sell function with market tracking"""
+    if drug in ["marijuana", "coca_leaves", "cannabis_products", "cocaine"]:
+        # Record the sale
+        drug_market.record_sale(drug, quantity)
+        
+        # Get current price
+        current_prices = drug_market.get_current_prices()
+        sell_price = current_prices[drug]["sell_price"]
+        
+        # Calculate earnings
+        earnings = sell_price * quantity
+        
+        # Update user money
+        data = load_data()
+        user_record = data.get(user_id, {"balance": 0, "cash": 0})
+        user_record["cash"] = user_record.get("cash", 0) + earnings
+        data[user_id] = user_record
+        save_data(data)
+        
+        return earnings, sell_price
+    
+    return 0, 0
+
+# Command to buy drugs
+@app_commands.command(name="buydrug", description="Buy drugs from the market")
+@app_commands.describe(drug="Type of drug to buy", quantity="Amount to buy")
+async def buydrug(interaction: discord.Interaction, drug: str, quantity: int):
+    if quantity <= 0:
+        await interaction.response.send_message("Quantity must be positive.", ephemeral=True)
+        return
+    
+    drug = drug.lower().replace(" ", "_")
+    current_prices = drug_market.get_current_prices()
+    
+    if drug not in current_prices:
+        available = ", ".join(current_prices.keys()).replace("_", " ")
+        await interaction.response.send_message(f"Invalid drug. Available: {available}", ephemeral=True)
+        return
+    
+    user_id = str(interaction.user.id)
+    buy_price = current_prices[drug]["buy_price"]
+    total_cost = buy_price * quantity
+    
+    # Load user data
+    data = load_data()
+    user_record = data.get(user_id, {"balance": 0, "cash": 0, "inventory": {}})
+    user_cash = user_record.get("cash", 0)
+    
+    if user_cash < total_cost:
+        await interaction.response.send_message(
+            f"Not enough cash! Need {total_cost:,}, you have {user_cash:,}",
+            ephemeral=True
+        )
+        return
+    
+    # Process purchase
+    user_record["cash"] = user_cash - total_cost
+    if "inventory" not in user_record:
+        user_record["inventory"] = {}
+    user_record["inventory"][drug] = user_record["inventory"].get(drug, 0) + quantity
+    
+    data[user_id] = user_record
+    save_data(data)
+    
+    await interaction.response.send_message(
+        f"💰 Bought {quantity} {drug.replace('_', ' ')} for {total_cost:,} cash!\n"
+        f"Cash remaining: {user_record['cash']:,}"
+    )
+
+# Command to sell drugs
+@app_commands.command(name="selldrug", description="Sell drugs to the market")
+@app_commands.describe(drug="Type of drug to sell", quantity="Amount to sell")
+async def selldrug(interaction: discord.Interaction, drug: str, quantity: int):
+    if quantity <= 0:
+        await interaction.response.send_message("Quantity must be positive.", ephemeral=True)
+        return
+    
+    drug = drug.lower().replace(" ", "_")
+    current_prices = drug_market.get_current_prices()
+    
+    if drug not in current_prices:
+        available = ", ".join(current_prices.keys()).replace("_", " ")
+        await interaction.response.send_message(f"Invalid drug. Available: {available}", ephemeral=True)
+        return
+    
+    user_id = str(interaction.user.id)
+    
+    # Load user data
+    data = load_data()
+    user_record = data.get(user_id, {"balance": 0, "cash": 0, "inventory": {}})
+    user_inventory = user_record.get("inventory", {})
+    current_amount = user_inventory.get(drug, 0)
+    
+    if current_amount < quantity:
+        await interaction.response.send_message(
+            f"Not enough {drug.replace('_', ' ')}! You have {current_amount}, trying to sell {quantity}",
+            ephemeral=True
+        )
+        return
+    
+    # Process sale
+    sell_price = current_prices[drug]["sell_price"]
+    total_earnings = sell_price * quantity
+    
+    user_record["cash"] = user_record.get("cash", 0) + total_earnings
+    user_record["inventory"][drug] = current_amount - quantity
+    
+    # Remove from inventory if quantity reaches 0
+    if user_record["inventory"][drug] == 0:
+        del user_record["inventory"][drug]
+    
+    data[user_id] = user_record
+    save_data(data)
+    
+    # Record the sale for market tracking
+    drug_market.record_sale(drug, quantity)
+    
+    await interaction.response.send_message(
+        f"💵 Sold {quantity} {drug.replace('_', ' ')} for {total_earnings:,} cash!\n"
+        f"Cash balance: {user_record['cash']:,}"
+    )
+
+# Command to check drug inventory
+@app_commands.command(name="drugs", description="Check your drug inventory")
+async def drugs(interaction: discord.Interaction):
+    user_id = str(interaction.user.id)
+    data = load_data()
+    user_record = data.get(user_id, {"inventory": {}})
+    inventory = user_record.get("inventory", {})
+    
+    # Filter only drug items
+    drug_items = {k: v for k, v in inventory.items() if k in drug_market.base_prices}
+    
+    if not drug_items:
+        await interaction.response.send_message("🚫 No drugs in inventory.", ephemeral=True)
+        return
+    
+    current_prices = drug_market.get_current_prices()
+    embed = discord.Embed(title="💊 Your Drug Inventory", color=0x9932cc)
+    
+    total_value = 0
+    for drug, amount in drug_items.items():
+        sell_price = current_prices[drug]["sell_price"]
+        value = sell_price * amount
+        total_value += value
+        
+        embed.add_field(
+            name=f"{drug.replace('_', ' ').title()}",
+            value=f"Amount: {amount:,}\nValue: {value:,} cash",
+            inline=True
+        )
+    
+    embed.set_footer(text=f"Total inventory value: {total_value:,} cash")
+    await interaction.response.send_message(embed=embed)
+@app_commands.command(name="drugmarket", description="Check current drug market prices and demand")
+async def drugmarket(interaction: discord.Interaction):
+    current_prices = drug_market.get_current_prices()
+    
+    embed = discord.Embed(title="🏪 Drug Market Status (Last 3 Days)", color=0x00ff00)
+    
+    for drug, info in current_prices.items():
+        multiplier = info["multiplier"]
+        sales_3days = info["sales_3days"]
+        
+        # Determine trend and status
+        if multiplier >= 1.4:
+            trend = "🚀 VERY HIGH DEMAND"
+            color_emoji = "🟢"
+        elif multiplier >= 1.15:
+            trend = "📈 HIGH DEMAND"
+            color_emoji = "🟡"
+        elif multiplier <= 0.6:
+            trend = "💥 CRASHED"
+            color_emoji = "🔴"
+        elif multiplier <= 0.8:
+            trend = "📉 FLOODED"
+            color_emoji = "🟠"
+        else:
+            trend = "📊 STABLE"
+            color_emoji = "⚪"
+            
+        # Determine market condition based on sales
+        if sales_3days < 50:
+            condition = "🔥 RARE"
+        elif sales_3days < 100:
+            condition = "⭐ LOW SUPPLY"
+        elif sales_3days < 200:
+            condition = "📦 MODERATE"
+        elif sales_3days > 800:
+            condition = "🌊 OVERSATURATED"
+        elif sales_3days > 600:
+            condition = "📊 HIGH VOLUME"
+        elif sales_3days > 400:
+            condition = "🔄 ACTIVE"
+        else:
+            condition = "✅ NORMAL"
+            
+        embed.add_field(
+            name=f"{color_emoji} {drug.replace('_', ' ').title()}",
+            value=f"**Sell: {info['sell_price']:,}** ({multiplier:.2f}x)\n"
+                  f"3-day sales: {sales_3days}\n"
+                  f"{condition}\n{trend}",
+            inline=True
+        )
+    
+    embed.set_footer(text="Prices adjust gradually (15% max per day) based on 3-day sales volume")
+    await interaction.response.send_message(embed=embed)
 async def setup(bot: commands.Bot):
     print("Loading IndustryCog...")
     await bot.add_cog(IndustryGroup(bot))
