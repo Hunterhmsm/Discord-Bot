@@ -75,129 +75,81 @@ def update_stock_prices(current_market_event):
         old_price = price
         is_coin = "COIN" in stock.upper()
 
-        # RANDOM CYCLE EFFECTS - each stock randomly enters different phases
-        cycle_roll = random.random()
-        
-        # 10% chance of entering a specific cycle each update
-        if cycle_roll < 0.02:  # 2% bubble phase
-            cycle_effect = "bubble"
-        elif cycle_roll < 0.04:  # 2% crash phase  
-            cycle_effect = "crash"
-        elif cycle_roll < 0.06:  # 2% recovery phase
-            cycle_effect = "recovery"
-        else:
-            cycle_effect = "normal"
-
         if is_coin:
-            # COINS - Wild and unpredictable
+            # COINS - More volatile but controlled
             if event_type == "rally":
                 if random.random() < 0.70:
-                    change_percent = random.uniform(0.20, 1.20)  # 20-120% gains possible
+                    change_percent = random.uniform(0.10, 2.00)  # Rally: 10% to 200%
                     new_price = price * (1 + change_percent)
                 else:
-                    change_percent = random.uniform(-0.30, 0.50)
+                    change_percent = random.uniform(0.005, 1.00)  # Normal: 0.5% to 100%
+                    if random.random() < 0.5:
+                        change_percent = -change_percent
                     new_price = price * (1 + change_percent)
             elif event_type == "crash":
                 if random.random() < 0.70:
-                    change_percent = random.uniform(0.15, 0.70)  # 15-70% crashes
+                    change_percent = random.uniform(0.10, 1.00)  # Crash: 10% to 100% down
                     new_price = price * (1 - change_percent)
                 else:
-                    change_percent = random.uniform(-0.40, 0.30)
+                    change_percent = random.uniform(0.005, 1.00)
+                    if random.random() < 0.5:
+                        change_percent = -change_percent
                     new_price = price * (1 + change_percent)
             else:
-                # Normal movement but with cycle effects
-                if cycle_effect == "bubble":
-                    # Bubble phase - strong upward bias
-                    change_percent = random.uniform(0.30, 2.00)  # 30-200% pump
-                    new_price = price * (1 + change_percent)
-                elif cycle_effect == "crash":
-                    # Crash phase - strong downward movement
-                    change_percent = random.uniform(0.40, 0.85)  # 40-85% dump
-                    new_price = price * (1 - change_percent)
-                elif cycle_effect == "recovery":
-                    # Recovery phase - moderate upward bias
-                    change_percent = random.uniform(0.10, 0.60)  # 10-60% recovery
-                    new_price = price * (1 + change_percent)
-                else:
-                    # Normal chaos: -70% to +150%
-                    change_percent = random.uniform(-0.70, 1.50)
-                    new_price = price * (1 + change_percent)
-                
-            # Set minimum but no maximum
-            new_price = max(round(new_price, 8), 0.00000001)
-            
+                # Normal coin movement: 0.5% to 50% fluctuation
+                change_percent = random.uniform(0.005, 0.50)
+                if random.random() < 0.5:
+                    change_percent = -change_percent
+                new_price = price * (1 + change_percent)
         else:
-            # REGULAR STOCKS - More stable but still can moon/crash
+            # STOCKS - Conservative and stable
             if event_type == "rally":
                 if random.random() < 0.70:
-                    change_percent = random.uniform(0.10, 0.35)  # 10-35% rally
+                    change_percent = random.uniform(0.10, 0.20)  # Rally: 10-20%
                     new_price = price * (1 + change_percent)
                 else:
-                    change_percent = random.uniform(-0.05, 0.15)
+                    change_percent = random.uniform(0.005, 0.05)  # Normal: 0.5-5%
+                    if random.random() < 0.5:
+                        change_percent = -change_percent
                     new_price = price * (1 + change_percent)
             elif event_type == "crash":
                 if random.random() < 0.70:
-                    change_percent = random.uniform(0.10, 0.35)  # 10-35% crash
+                    change_percent = random.uniform(0.10, 0.20)  # Crash: 10-20% down
                     new_price = price * (1 - change_percent)
                 else:
-                    change_percent = random.uniform(-0.05, 0.10)
+                    change_percent = random.uniform(0.005, 0.05)
+                    if random.random() < 0.5:
+                        change_percent = -change_percent
                     new_price = price * (1 + change_percent)
             else:
-                # Cycle effects for stocks too
-                if cycle_effect == "bubble":
-                    # Stock bubble - strong gains
-                    change_percent = random.uniform(0.20, 0.80)  # 20-80% pump
-                    new_price = price * (1 + change_percent)
-                elif cycle_effect == "crash":
-                    # Stock crash
-                    change_percent = random.uniform(0.25, 0.60)  # 25-60% dump
-                    new_price = price * (1 - change_percent)
-                elif cycle_effect == "recovery":
-                    # Stock recovery
-                    change_percent = random.uniform(0.08, 0.40)  # 8-40% recovery
-                    new_price = price * (1 + change_percent)
-                else:
-                    # Rare mega moves
-                    if random.random() < 0.01:  # 1% chance
-                        jump_factor = random.uniform(0.40, 1.20)  # 40-120% mega move
-                        if random.random() < 0.5:
-                            new_price = price * (1 + jump_factor)  # Moon
-                        else:
-                            new_price = price * (1 - min(jump_factor, 0.90))  # Crash (max 90% down)
+                # Rare big moves for stocks
+                if random.random() < 0.01:  # 1% chance
+                    jump_factor = random.uniform(0.5, 0.95)  # 50-95% jump
+                    if random.random() < 0.5:
+                        new_price = price * (1 + jump_factor)  # Up
                     else:
-                        # Normal: -12% to +12%
-                        change_percent = random.uniform(-0.12, 0.12)
-                        new_price = price * (1 + change_percent)
-            
-            # Set minimum
+                        new_price = price * (1 - jump_factor)  # Down
+                else:
+                    # Normal stock movement: 0.5% to 5%
+                    change_percent = random.uniform(0.005, 0.05)
+                    if random.random() < 0.5:
+                        change_percent = -change_percent
+                    new_price = price * (1 + change_percent)
+
+        # Round appropriately for coin precision vs stock precision
+        if is_coin:
+            new_price = max(round(new_price, 8), 0.00000001)
+        else:
             new_price = max(round(new_price, 2), 0.01)
-
-        # RANDOM INTERVENTION - very rare extreme events
-        extreme_roll = random.random()
-        if extreme_roll < 0.001:  # 0.1% chance per stock per update
-            if random.random() < 0.5:
-                # MEGA MOON - 500-2000% gain
-                moon_factor = random.uniform(5.0, 20.0)
-                new_price = price * moon_factor
-                print(f"🚀 {stock} MEGA MOON! {moon_factor:.1f}x gain!")
-            else:
-                # MEGA CRASH - 80-95% loss
-                crash_factor = random.uniform(0.05, 0.20)
-                new_price = price * crash_factor
-                print(f"💥 {stock} MEGA CRASH! {(1-crash_factor)*100:.0f}% loss!")
-
-        # Recovery boost if hitting minimum
-        if (is_coin and new_price <= 0.00000001) or (not is_coin and new_price <= 0.01):
-            boost = random.uniform(0.20, 1.50)  # 20-150% recovery boost
-            new_price = new_price * (1 + boost)
-            if is_coin:
-                new_price = round(new_price, 8)
-            else:
-                new_price = round(new_price, 2)
-            print(f"🔄 {stock} RECOVERY BOOST! +{boost*100:.0f}%")
-
+            
         data[stock] = new_price
-        absolute_change = round(new_price - old_price, 8 if is_coin else 2)
+        
+        # Calculate changes with appropriate precision
+        if is_coin:
+            absolute_change = round(new_price - old_price, 8)
+        else:
+            absolute_change = round(new_price - old_price, 2)
+            
         percent_change = round(((new_price - old_price) / old_price) * 100, 2) if old_price != 0 else 0
         changes[stock] = {"old": old_price, "new": new_price, "abs": absolute_change, "perc": percent_change}
         
@@ -215,7 +167,6 @@ def update_stock_prices(current_market_event):
     save_stock_history(history)
     print("Stock prices updated:", data)
     return changes, current_market_event
-
 
 class StocksCog(commands.Cog):
     def __init__(self, bot: commands.Bot):
