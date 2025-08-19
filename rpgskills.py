@@ -23,11 +23,35 @@ def rend(scene, attacker_uid, target_uid):
     attacker_name = attacker_data.get('name', attacker_uid)
     target_name   = target_data.get('name', target_uid)
 
-    # ——— Stamina cost for players ———
+    # ——— Player-only restrictions ———
     if is_player:
+        # Stamina cost
         stamina = attacker_data.get("stamina", 0)
         if stamina < 3:
-            return f"{attacker_name} doesn’t have enough stamina to use Rend! (3 required)"
+            return f"{attacker_name} doesn't have enough stamina to use Rend! (3 required)"
+        
+        # Melee weapon requirement
+        eq = attacker_data.get("equipment", {})
+        main = eq.get("mainhand", "").lower().replace(" ", "_")
+        off  = eq.get("offhand", "").lower().replace(" ", "_")
+
+        items = json.load(open(RPG_ITEMS_FILE))
+        weapons = items.get("weapons", {})
+
+        main_data = weapons.get(main, {})
+        off_data  = weapons.get(off, {})
+
+        # Check for melee weapon
+        has_melee = False
+        if main_data.get("range") == "melee":
+            has_melee = True
+        elif off_data.get("range") == "melee":
+            has_melee = True
+
+        if not has_melee:
+            return f"{attacker_name} needs a melee weapon to use Rend!"
+
+        # Deduct stamina
         attacker_data["stamina"] = stamina - 3
         chars[attacker_uid] = attacker_data
         rpg_save_data(chars)
@@ -52,11 +76,35 @@ def shield_bash(scene, attacker_uid, target_uid):
     attacker_name = attacker_data.get('name', attacker_uid)
     target_name   = target_data.get('name', target_uid)
 
-    # ——— Stamina cost for players ———
+    # ——— Player-only restrictions ———
     if is_player:
+        # Stamina cost
         stamina = attacker_data.get("stamina", 0)
         if stamina < 2:
-            return f"{attacker_name} doesn’t have enough stamina to use Shield Bash! (2 required)"
+            return f"{attacker_name} doesn't have enough stamina to use Shield Bash! (2 required)"
+        
+        # Shield requirement
+        eq = attacker_data.get("equipment", {})
+        main = eq.get("mainhand", "").lower().replace(" ", "_")
+        off  = eq.get("offhand", "").lower().replace(" ", "_")
+
+        items = json.load(open(RPG_ITEMS_FILE))
+        armor_items = items.get("armor", {})
+
+        main_data = armor_items.get(main, {})
+        off_data  = armor_items.get(off, {})
+
+        # Check for shield (shields are in armor category with offhand slot)
+        has_shield = False
+        if "shield" in main.lower():
+            has_shield = True
+        elif "shield" in off.lower():
+            has_shield = True
+
+        if not has_shield:
+            return f"{attacker_name} needs a shield to use Shield Bash!"
+
+        # Deduct stamina
         attacker_data["stamina"] = stamina - 2
         chars[attacker_uid] = attacker_data
         rpg_save_data(chars)
@@ -77,40 +125,51 @@ def cleave(scene, attacker_uid, target_uid=None):
     attacker_data = chars.get(attacker_uid) or scene.enemies_data.get(attacker_uid, {})
     attacker_name = attacker_data.get("name", attacker_uid)
 
-    # ——— Stamina Check for players ———
+    # ——— Player-only restrictions ———
     if is_player:
+        # Stamina cost
         stamina = attacker_data.get("stamina", 0)
         if stamina < 4:
             return f"{attacker_name} doesn't have enough stamina to cleave! (4 required)"
+
+        # Weapon requirements: melee + slashing
+        eq = attacker_data.get("equipment", {})
+        main = eq.get("mainhand", "").lower().replace(" ", "_")
+        off  = eq.get("offhand", "").lower().replace(" ", "_")
+
+        items = json.load(open(RPG_ITEMS_FILE))
+        weapons = items.get("weapons", {})
+
+        main_data = weapons.get(main, {})
+        off_data  = weapons.get(off, {})
+
+        weapon_data = None
+        if main_data.get("type") == "slashing" and main_data.get("range") == "melee":
+            weapon_data = main_data
+        elif off_data.get("type") == "slashing" and off_data.get("range") == "melee":
+            weapon_data = off_data
+
+        if not weapon_data:
+            return f"{attacker_name} needs a melee slashing weapon to cleave!"
+
+        # Deduct stamina
         attacker_data["stamina"] = stamina - 4
         chars[attacker_uid] = attacker_data
         rpg_save_data(chars)
 
-    # Determine weapon types from equipment (for players)
-    eq = attacker_data.get("equipment", {})
-    main = eq.get("mainhand", "").lower().replace(" ", "_")
-    off  = eq.get("offhand", "").lower().replace(" ", "_")
-
-    items = json.load(open(RPG_ITEMS_FILE))
-    weapons = items.get("weapons", {})
-
-    main_data = weapons.get(main, {})
-    off_data  = weapons.get(off, {})
-
-    weapon_data = None
-    if main_data.get("type") == "slashing":
-        weapon_data = main_data
-    elif off_data.get("type") == "slashing":
-        weapon_data = off_data
-    elif not is_player and attacker_data.get("type") == "slashing":
-        weapon_data = {"type": "slashing"}  # fallback for NPCs
+    else:
+        # Enemy path - simplified check
+        if attacker_data.get("type") == "slashing":
+            weapon_data = {"type": "slashing"}
+        else:
+            weapon_data = None
 
     if not weapon_data:
-        return f"{attacker_name} tries to cleave, but is not wielding a slashing weapon!"
+        return f"{attacker_name} tries to cleave, but lacks the proper weapon!"
 
     # Choose target group
-    frontline = scene.enemy_frontline
-    backline  = scene.enemy_backline
+    frontline = scene.enemy_frontline if is_player else scene.friendly_frontline
+    backline  = scene.enemy_backline if is_player else scene.friendly_backline
     targets = frontline if frontline else backline
     if not targets:
         return f"{attacker_name} swings wildly, but there are no targets!"
@@ -122,8 +181,12 @@ def cleave(scene, attacker_uid, target_uid=None):
         armor = target_data.get("armor", 10)
 
         # Use player's stat for attack bonus
-        stat_key = weapons.get(main, {}).get("stat", "strength").capitalize()
-        bonus = attacker_data.get("stats", {}).get(stat_key, 0) // 2 if is_player else attacker_data.get("attack_bonus", 0)
+        if is_player:
+            stat_key = weapons.get(main, {}).get("stat", "strength").capitalize()
+            bonus = attacker_data.get("stats", {}).get(stat_key, 0) // 2
+        else:
+            bonus = attacker_data.get("attack_bonus", 0)
+            
         if "dazed" in scene.conditions.get(attacker_uid, {}):
             bonus -= 2
 
@@ -132,9 +195,14 @@ def cleave(scene, attacker_uid, target_uid=None):
         msg = f"{attacker_name} cleaves at {target_name} ({roll}+{bonus}={total} vs AC {armor}). "
 
         if total >= armor:
-            dmg_min = weapons.get(main, {}).get("damage", {}).get("min", 1)
-            dmg_max = weapons.get(main, {}).get("damage", {}).get("max", 4)
-            dmg_type = weapons.get(main, {}).get("type", "slashing")
+            if is_player:
+                dmg_min = weapons.get(main, {}).get("damage", {}).get("min", 1)
+                dmg_max = weapons.get(main, {}).get("damage", {}).get("max", 4)
+                dmg_type = weapons.get(main, {}).get("type", "slashing")
+            else:
+                dmg_min = attacker_data.get("damage_min", 1)
+                dmg_max = attacker_data.get("damage_max", 4)
+                dmg_type = attacker_data.get("type", "slashing")
 
             dmg = random.randint(dmg_min, dmg_max)
             final_dmg = apply_damage_modifiers(scene, tid, dmg, dmg_type)
@@ -172,4 +240,4 @@ def bleeding(scene, target_uid):
 
 def dazed(scene, target_uid):
     """Dazed reduces to-hit chance. No message needed unless desired."""
-    return None  # You could return a string if you want a log message
+    return None  

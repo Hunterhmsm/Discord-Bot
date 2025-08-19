@@ -112,7 +112,7 @@ def check_deaths(scene: CombatScene) -> str | None:
                 lst.remove(uid)
                 grave.append(uid)
 
-                # If it’s a player, log+backup+remove via add_to_graveyard
+                # If it's a player, log+backup+remove via add_to_graveyard
                 if is_player:
                     # use the last attacker as killer if stored, or "Unknown"
                     killer = getattr(scene, '_last_attacker', None) or "Unknown"
@@ -170,6 +170,83 @@ def tick_effects(scene, send_fn):
             del scene.cooldowns[uid]
 
 
+# MAIN FUNCTION TO START COMBAT
+def start_combat(player_uids: list, enemy_configs: list) -> tuple[str, CombatScene, discord.Embed]:
+    """
+    Start a combat encounter with given players and enemies.
+    
+    Args:
+        player_uids: List of player user IDs (as strings)
+        enemy_configs: List of enemy configurations (dicts with enemy data)
+    
+    Returns:
+        tuple: (combat_id, scene, embed) for the initial combat state
+    """
+    # 1) Create a new combat ID and scene
+    cid = str(uuid.uuid4())
+    scene = CombatScene()
+    combat_scenes[cid] = scene
+
+    # 2) Add players as friendlies
+    data = rpg_load_data()
+    for uid in player_uids:
+        ch = data.get(uid)
+        if not ch:
+            continue
+        scene.friendly_frontline.append(uid)
+        scene.hp_map[uid] = ch.get('current_hp', ch.get('max_hp', 0))
+        scene.initiative_order[uid] = random.randint(1, 10) + ch.get('speed', 0)
+
+    # 3) Add enemies with proper naming
+    enemy_counts = {}  # Track how many of each enemy type we've added
+    for enemy_cfg in enemy_configs:
+        base_name = enemy_cfg.get("name", "Unknown").lower()
+        
+        # Count this enemy type
+        enemy_counts[base_name] = enemy_counts.get(base_name, 0) + 1
+        count = enemy_counts[base_name]
+        
+        # Create unique ID: "goblin_1", "goblin_2", "orc_1", etc.
+        eid = f"{base_name}_{count}"
+        scene.enemies_data[eid] = enemy_cfg
+
+        # HP
+        hp_min = enemy_cfg.get('hp_min', enemy_cfg.get('hp', 1))
+        hp_max = enemy_cfg.get('hp_max', enemy_cfg.get('hp', 1))
+        scene.hp_map[eid] = random.randint(hp_min, hp_max)
+        scene.hp_range_map[eid] = (hp_min, hp_max)
+
+        # XP
+        xp_min = enemy_cfg.get('xp_min', 0)
+        xp_max = enemy_cfg.get('xp_max', 0)
+        scene.xp_range_map[eid] = (xp_min, xp_max)
+
+        # Formation
+        formation = enemy_cfg.get('formation', 'front').lower()
+        if formation.startswith('front'):
+            scene.enemy_frontline.append(eid)
+        else:
+            scene.enemy_backline.append(eid)
+
+        # Initiative
+        scene.initiative_order[eid] = random.randint(1, 10) + enemy_cfg.get('speed', 0)
+
+    # 4) Build turn order (highest initiative first) and init action flags
+    scene.turn_order = sorted(
+        scene.initiative_order.keys(),
+        key=lambda u: scene.initiative_order[u],
+        reverse=True
+    )
+    for u in scene.turn_order:
+        scene.actions_used[u] = {'action': False, 'side_action': False}
+
+    # 5) Persist and return
+    save_combats()
+    embed = build_embed(scene)
+    
+    return cid, scene, embed
+
+
 # UI Elements
 class CombatView(View):
     def __init__(self, combat_id: str):
@@ -195,9 +272,14 @@ class CombatView(View):
         self.add_item(self.side_target_select)
         self.add_item(self.end_button)
 
-        # now that .view is bound, populate options
+        # now that .view is bound, populate options initially (will be refreshed on interactions)
         self.main_action.refresh_options()
         self.side_action.refresh_options()
+
+    def refresh_for_user(self, user_id: str):
+        """Refresh all user-specific components for a given user"""
+        self.main_action.refresh_options(user_id)
+        self.side_action.refresh_options(user_id)
 
     async def resolve_side_action(self, interaction: discord.Interaction) -> str:
         scene = combat_scenes[self.combat_id]
@@ -230,7 +312,7 @@ class CombatView(View):
         scene = combat_scenes[self.combat_id]
 
         # Run enemy turns in sequence
-        while scene.turn_order and scene.turn_order[scene.current_turn_index].startswith("enemy_"):
+        while scene.turn_order and not scene.turn_order[scene.current_turn_index] in rpg_load_data():
             uid = scene.turn_order[scene.current_turn_index]
             tick_effects(scene, lambda msg: scene.log.append(msg))
             await message.edit(embed=build_embed(scene), view=self)
@@ -263,11 +345,10 @@ class CombatView(View):
         # ——— PATCH: Refresh controls for player after enemies finish ———
         if scene.turn_order:
             current_uid = scene.turn_order[scene.current_turn_index]
-            if not current_uid.startswith("enemy_"):
-                self.main_action.refresh_options()
-                self.side_action.refresh_options()
+            if current_uid in rpg_load_data():
+                self.refresh_for_user(current_uid)
                 await message.edit(embed=build_embed(scene), view=self)
-        # once you break out, it is now a player’s turn
+        # once you break out, it is now a player's turn
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
         scene = combat_scenes.get(self.combat_id)
@@ -275,9 +356,12 @@ class CombatView(View):
             await interaction.response.send_message('No active combat.', ephemeral=True)
             return False
         current = scene.turn_order[scene.current_turn_index]
-        if not current.startswith('enemy_') and str(interaction.user.id) != current:
+        if current not in rpg_load_data() and str(interaction.user.id) != current:
             await interaction.response.send_message("It's not your turn.", ephemeral=True)
             return False
+        
+        # Refresh UI components with the current user's data
+        self.refresh_for_user(str(interaction.user.id))
         return True
     # Handlers attached to CombatView
     async def on_move(self, interaction: discord.Interaction):
@@ -318,7 +402,10 @@ class CombatView(View):
                 new_position = "frontline"
 
             if moved:
-                result = f"<@{uid}> moved to the {new_position}."
+                # Get character name instead of using @mention
+                chars = rpg_load_data()
+                char_name = chars.get(uid, {}).get('name', f'<@{uid}>')
+                result = f"{char_name} moved to the {new_position}."
                 scene.actions_used[uid]['action'] = True
             else:
                 result = "Move action failed. You were not found in either line."
@@ -363,12 +450,28 @@ class CombatView(View):
                 scene.hp_map[tgt] -= final_dmg
                 scene.hp_map[tgt] = max(scene.hp_map[tgt], 0)
                 res += f"Hit! {final_dmg} {dmg_type} damage."
+                
+                # DEBUG: Check enemy HP after damage
+                print(f"DEBUG: {tgt} HP after damage: {scene.hp_map.get(tgt, 'NOT_FOUND')}")
+                print(f"DEBUG: About to check deaths...")
             else:
                 res += "Miss!"
 
+            # LOG THE ATTACK RESULT BEFORE DEATH CHECK
+            scene.log.append(res)
+            scene.actions_used[uid]['action'] = True
+
             # 6) Check for deaths immediately
+            print(f"DEBUG: Calling check_deaths()...")
             wiped = check_deaths(scene)
+            print(f"DEBUG: Deaths check result: {wiped}")
+            print(f"DEBUG: Enemy frontline: {scene.enemy_frontline}")
+            print(f"DEBUG: Enemy backline: {scene.enemy_backline}")
+            print(f"DEBUG: Turn order: {scene.turn_order}")
+            
             if wiped:
+                print(f"DEBUG: Combat ending detected! Players won: {wiped == 'players'}")
+                
                 # handle end-of-combat
                 chars = rpg_load_data()
                 for uid in scene.friendly_frontline + scene.friendly_backline:
@@ -377,23 +480,33 @@ class CombatView(View):
                 rpg_save_data(chars)  # ← Persist HP
 
                 players_alive = (wiped == 'players')
+                print(f"DEBUG: Players alive: {players_alive}")
+                
                 # award XP if players won
                 if players_alive:
-                    players   = [u for u in scene.initiative_order if not u.startswith('enemy_')]
+                    players   = [u for u in scene.initiative_order if u in rpg_load_data()]
                     total_xp  = sum(random.randint(*scene.xp_range_map[e]) for e in scene.graveyard_enemy)
                     xp_each   = total_xp // len(players) if players else 0
+                    print(f"DEBUG: Awarding {xp_each} XP to each of {len(players)} players")
+                    print(f"DEBUG: Dead enemies: {scene.graveyard_enemy}")
+                    print(f"DEBUG: XP ranges: {scene.xp_range_map}")
+                    
                     chars     = rpg_load_data()
                     for p in players:
                         chars[p]['experience'] = chars[p].get('experience', 0) + xp_each
                     rpg_save_data(chars)
+                    
                 # final embed + message
+                print(f"DEBUG: Editing message and cleaning up...")
                 await interaction.message.edit(embed=build_embed(scene), view=None)
                 msg = f"Combat ended! +{xp_each} XP" if players_alive else "Your party has fallen…"
-                scene.log.append(res)
-                await interaction.message.edit(embed=build_embed(scene), view=self)
+                await interaction.channel.send(msg)
+                
                 # cleanup
+                print(f"DEBUG: Deleting combat {cid}")
                 del combat_scenes[cid]
                 save_combats()
+                print(f"DEBUG: Combat cleanup complete!")
                 return
 
             # check deaths after side actions too
@@ -441,10 +554,11 @@ class CombatView(View):
             {'action': False, 'side_action': False}
         )
 
-        # Refresh options
+        # Refresh options for the current player
         current_uid = scene.turn_order[scene.current_turn_index]
-        self.main_action.refresh_options()
-        self.side_action.refresh_options()
+        if current_uid in rpg_load_data():  # Only refresh for players
+            self.refresh_for_user(current_uid)
+        
         save_combats()
         await interaction.message.edit(embed=build_embed(scene), view=self)
 
@@ -452,7 +566,7 @@ class CombatView(View):
         # ─── AUTOMATED ENEMY TURNS via centralized AI ───
         while True:
             next_uid = scene.turn_order[scene.current_turn_index]
-            if not next_uid.startswith("enemy_"):
+            if next_uid in rpg_load_data():  # If it's a player, stop
                 break
 
             outcome = resolve_ai(scene, next_uid)
@@ -501,13 +615,13 @@ class CombatView(View):
 
         # give XP only if players won
         if xp_win:
-            players   = [u for u in scene.initiative_order if not u.startswith('enemy_')]
+            players   = [u for u in scene.initiative_order if u in rpg_load_data()]
             total_xp  = sum(random.randint(*scene.xp_range_map[e]) 
                             for e in scene.graveyard_enemy)
             xp_each   = total_xp // len(players) if players else 0
             chars     = rpg_load_data()
             for p in players:
-                chars[p]['xp'] = chars[p].get('xp', 0) + xp_each
+                chars[p]['experience'] = chars[p].get('experience', 0) + xp_each
             rpg_save_data(chars)
 
         # final embed (no more view)
@@ -530,12 +644,12 @@ class CombatView(View):
 
         # award XP if win
         if xp_win:
-            players   = [u for u in scene.initiative_order if not u.startswith("enemy_")]
+            players   = [u for u in scene.initiative_order if u in rpg_load_data()]
             total_xp  = sum(random.randint(*scene.xp_range_map[e]) for e in scene.graveyard_enemy)
             xp_each   = total_xp // len(players) if players else 0
             chars     = rpg_load_data()
             for p in players:
-                chars[p]["xp"] = chars[p].get("xp", 0) + xp_each
+                chars[p]["experience"] = chars[p].get("experience", 0) + xp_each
             rpg_save_data(chars)
 
         # persist PC HPs
@@ -563,17 +677,20 @@ class MainActionSelect(Select):
     def __init__(self):
         super().__init__(placeholder='Main Action', min_values=1, max_values=1, options=[])
 
-    def refresh_options(self):
+    def refresh_options(self, user_id: str = None):
         self.options.clear()
 
         scene = combat_scenes[self.view.combat_id]
         current = scene.turn_order[scene.current_turn_index]
 
+        # Use provided user_id or fall back to current turn (for backwards compatibility)
+        target_uid = user_id or current
+        
         self.disabled = False
         self.options.append(discord.SelectOption(label='Attack', value='attack'))
         self.options.append(discord.SelectOption(label='Move', value='move'))
 
-        char = rpg_load_data().get(current, {})
+        char = rpg_load_data().get(target_uid, {})
         for sk in char.get('action_skills', []):
             func_name = sk.lower().replace(' ', '_')
             label = sk.title()
@@ -581,7 +698,8 @@ class MainActionSelect(Select):
 
 
     async def callback(self, interaction: discord.Interaction):
-        self.refresh_options()
+        # Refresh with the interacting user's ID
+        self.refresh_options(str(interaction.user.id))
 
         choice = self.values[0]
         scene = combat_scenes[self.view.combat_id]
@@ -592,7 +710,7 @@ class MainActionSelect(Select):
             await interaction.response.defer()
             return
 
-        # Check cooldown
+        # Check cooldown (use current turn user, not interaction user)
         cooldowns = scene.cooldowns.get(current, {})
         if choice in cooldowns:
             await interaction.response.send_message(
@@ -612,10 +730,13 @@ class SideActionSelect(Select):
         super().__init__(placeholder='Side Action', min_values=1, max_values=1, options=[])
         self.disabled = False
 
-    def refresh_options(self):
+    def refresh_options(self, user_id: str = None):
         self.options.clear()
         scene = combat_scenes[self.view.combat_id]
         current = scene.turn_order[scene.current_turn_index]
+
+        # Use provided user_id or fall back to current turn (for backwards compatibility)
+        target_uid = user_id or current
 
         self.disabled = False
         self.options.append(discord.SelectOption(
@@ -624,7 +745,7 @@ class SideActionSelect(Select):
             description="Skip side action this turn"
         ))
 
-        char = rpg_load_data().get(current, {})
+        char = rpg_load_data().get(target_uid, {})
         for sk in char.get('sideaction_skills', []):
             func_name = sk.lower().replace(' ', '_')
             label = sk.title()
@@ -632,7 +753,8 @@ class SideActionSelect(Select):
 
 
     async def callback(self, interaction: discord.Interaction):
-        self.refresh_options()
+        # Refresh with the interacting user's ID
+        self.refresh_options(str(interaction.user.id))
 
         choice = self.values[0]
         scene = combat_scenes[self.view.combat_id]
@@ -641,6 +763,7 @@ class SideActionSelect(Select):
         if choice == 'none':
             self.view.pending_side = None
         else:
+            # Check cooldown (use current turn user, not interaction user)
             cooldowns = scene.cooldowns.get(current, {})
             if choice in cooldowns:
                 await interaction.response.send_message(
@@ -673,11 +796,21 @@ class TargetSelect(Select):
             )
 
         # Enemy targets
-        for idx, tid in enumerate(scene.enemy_frontline + scene.enemy_backline, start=1):
+        for tid in scene.enemy_frontline + scene.enemy_backline:
             ed = scene.enemies_data.get(tid, {})
-            # fallback if no 'name' key
-            enemy_name = ed.get('name', tid.replace('enemy_', '').replace('_', ' ').title())
-            label = f"{enemy_name} #{idx}"
+            enemy_name = ed.get('name', 'Unknown')
+            
+            # Extract number from ID (e.g., "goblin_2" -> "2")
+            parts = tid.split('_')
+            if len(parts) >= 2 and parts[-1].isdigit():
+                num = parts[-1]
+                if int(num) > 1:  # Only show number if it's not the first one
+                    label = f"{enemy_name} #{num}"
+                else:
+                    label = enemy_name
+            else:
+                label = enemy_name
+                
             self.options.append(
                 discord.SelectOption(label=label, value=tid)
             )
@@ -706,10 +839,21 @@ class SideTargetSelect(Select):
             )
 
         # Enemy targets
-        for idx, tid in enumerate(scene.enemy_frontline + scene.enemy_backline, start=1):
+        for tid in scene.enemy_frontline + scene.enemy_backline:
             ed = scene.enemies_data.get(tid, {})
-            enemy_name = ed.get('name', tid.replace('enemy_', '').replace('_', ' ').title())
-            label = f"{enemy_name} #{idx}"
+            enemy_name = ed.get('name', 'Unknown')
+            
+            # Extract number from ID (e.g., "goblin_2" -> "2")
+            parts = tid.split('_')
+            if len(parts) >= 2 and parts[-1].isdigit():
+                num = parts[-1]
+                if int(num) > 1:  # Only show number if it's not the first one
+                    label = f"{enemy_name} #{num}"
+                else:
+                    label = enemy_name
+            else:
+                label = enemy_name
+                
             self.options.append(
                 discord.SelectOption(label=label, value=tid)
             )
@@ -743,12 +887,24 @@ def build_embed(scene):
         lines = []
         for uid in uids:
             # Player?
-            if isinstance(uid, str) and uid in chars:
+            if uid in chars:
                 name = chars[uid].get("name", f"<@{uid}>")
             else:
-                # Enemy
+                # Enemy - extract name and number
                 ed = scene.enemies_data.get(uid, {})
-                name = ed.get("name", uid)
+                base_name = ed.get("name", "Unknown")
+                
+                # Extract number from ID (e.g., "goblin_2" -> "2")
+                parts = uid.split('_')
+                if len(parts) >= 2 and parts[-1].isdigit():
+                    num = parts[-1]
+                    if int(num) > 1:  # Only show number if it's not the first one
+                        name = f"{base_name} #{num}"
+                    else:
+                        name = base_name
+                else:
+                    name = base_name
+                    
             hp = scene.hp_map.get(uid, 0)
             lines.append(f"{name} (HP: {hp})")
         return "\n".join(lines)
@@ -787,11 +943,23 @@ def build_embed(scene):
         if scene.hp_map.get(uid, 0) <= 0:
             continue
 
-        if isinstance(uid, str) and uid in chars:
+        if uid in chars:
             display = chars[uid].get("name", f"<@{uid}>")
         else:
+            # Enemy - extract name and number
             ed = scene.enemies_data.get(uid, {})
-            display = ed.get("name", uid)
+            base_name = ed.get("name", "Unknown")
+            
+            # Extract number from ID (e.g., "goblin_2" -> "2")  
+            parts = uid.split('_')
+            if len(parts) >= 2 and parts[-1].isdigit():
+                num = parts[-1]
+                if int(num) > 1:  # Only show number if it's not the first one
+                    display = f"{base_name} #{num}"
+                else:
+                    display = base_name
+            else:
+                display = base_name
 
         init_val = scene.initiative_order.get(uid, 0)
         used = scene.actions_used.get(uid, {})
@@ -805,7 +973,7 @@ def build_embed(scene):
         inline=False
     )
     if scene.log:
-        log_text = "\n".join(scene.log[-10:])  # Show last 5 lines
+        log_text = "\n".join(scene.log[-10:])  # Show last 10 lines
         embed.add_field(name="Recent Actions", value=log_text, inline=False)
     return embed
 
@@ -815,100 +983,50 @@ class CombatCog(commands.Cog):
         self.bot = bot
 
     @app_commands.guilds(discord.Object(id=GUILD_ID))
-    @app_commands.command(name='combat', description='Start a new combat encounter.')
-    async def combat(self, interaction: discord.Interaction):
-        # 1) Create a new combat ID and scene
-        cid = str(uuid.uuid4())
-        scene = CombatScene()
-        combat_scenes[cid] = scene
-
-        # 2) Add party members as friendlies
+    @app_commands.command(name='combat', description='TEST: Start a combat encounter with a goblin.')
+    async def combat_test(self, interaction: discord.Interaction):
+        """Test function for combat - spawns a goblin fight"""
+        
+        # Get party members
         uid = str(interaction.user.id)
         parties = load_parties()
         leader = next((pid for pid, p in parties.items() if p.get('leader') == uid), None)
-        members = parties[leader]['members'] if leader else [uid]
+        players = parties[leader]['members'] if leader else [uid]
+        
+        # Validate players have characters
         data = rpg_load_data()
-        for u in members:
-            ch = data.get(u)
-            if not ch:
-                continue
-            scene.friendly_frontline.append(u)
-            scene.hp_map[u] = ch.get('current_hp', ch.get('hp', 0))
-            scene.initiative_order[u] = random.randint(1, 10) + ch.get('speed', 0)
+        valid_players = [u for u in players if u in data]
+        if not valid_players:
+            await interaction.response.send_message("No valid characters found for combat.", ephemeral=True)
+            return
 
-        # 3) Load any file‐based enemies (if you still have a list under "enemies" key)
+        # Load goblin config from enemies.json
+        enemy_configs = []
         if os.path.exists(ENEMIES_FILE):
-            raw = json.load(open(ENEMIES_FILE))
-            file_enemies = raw.get('enemies', None)
-            if isinstance(file_enemies, list):
-                for idx, e in enumerate(file_enemies):
-                    eid = f'enemy_{idx}'
-                    scene.enemies_data[eid] = e
-                    hp = random.randint(e.get('hp_min', 0), e.get('hp_max', e.get('hp', 0)))
-                    scene.hp_map[eid] = hp
-                    scene.hp_range_map[eid] = (e.get('hp_min', 0), e.get('hp_max', e.get('hp', 0)))
-                    scene.xp_range_map[eid] = (e.get('xp_min', 0), e.get('xp_max', 0))
-                    scene.enemy_frontline.append(eid)
-                    scene.initiative_order[eid] = random.randint(1, 10) + e.get('speed', 0)
-
-        # 4) Spawn Goblin from enemies.json top‐level "goblin" key
-        # ─── Spawn Goblin from enemies.json top‐level "goblin" key ───
-        if os.path.exists(ENEMIES_FILE):
-            all_cfg   = json.load(open(ENEMIES_FILE))
+            all_cfg = json.load(open(ENEMIES_FILE))
             goblin_cfg = all_cfg.get('goblin')
             if goblin_cfg:
-                # **ensure a name is present**
+                # Ensure a name is present
                 goblin_cfg['name'] = goblin_cfg.get('name', 'Goblin')
+                enemy_configs.append(goblin_cfg)
 
-                eid = 'enemy_goblin'
-                scene.enemies_data[eid] = goblin_cfg
+        if not enemy_configs:
+            await interaction.response.send_message("No enemies configured for test combat.", ephemeral=True)
+            return
 
-                # HP
-                hp_min, hp_max = goblin_cfg['hp_min'], goblin_cfg['hp_max']
-                scene.hp_map[eid] = random.randint(hp_min, hp_max)
-                scene.hp_range_map[eid] = (hp_min, hp_max)
+        # Start the combat
+        cid, scene, embed = start_combat(valid_players, enemy_configs)
+        view = CombatView(cid)
 
-                # XP
-                xp_min, xp_max = goblin_cfg.get('xp_min', 0), goblin_cfg.get('xp_max', 0)
-                scene.xp_range_map[eid] = (xp_min, xp_max)
-
-                # placement
-                if goblin_cfg.get('formation', 'front').lower().startswith('front'):
-                    scene.enemy_frontline.append(eid)
-                else:
-                    scene.enemy_backline.append(eid)
-
-                # initiative
-                scene.initiative_order[eid] = random.randint(1, 10) + goblin_cfg.get('speed', 0)
-
-
-        # 5) Build turn order (highest initiative first) and init action flags
-        scene.turn_order = sorted(
-            scene.initiative_order.keys(),
-            key=lambda u: scene.initiative_order[u],
-            reverse=True
-        )
-        for u in scene.turn_order:
-            scene.actions_used[u] = {'action': False, 'side_action': False}
-
-        # 6) Persist, then send embed + view
-        save_combats()
-        embed = build_embed(scene)
-        view  = CombatView(cid)
-
-        # 1) Send the embed + view
+        # Send the combat interface
         await interaction.response.send_message(f'Combat ID: {cid}', embed=embed, view=view)
-        # 2) Grab the sent Message
+        
+        # If first actor is an enemy, auto-run their turns
         msg = await interaction.original_response()
-
-        # If the first actor is an enemy, auto‐run their turns
         first = scene.turn_order[0] if scene.turn_order else None
-        if first and first.startswith('enemy_'):
+        if first and first not in data:  # If first is not a player
             await asyncio.sleep(0.5)
             await view._auto_enemy_turns(msg)
-
-
-
 
     @app_commands.guilds(discord.Object(id=GUILD_ID))
     @app_commands.command(name='formation', description='Set your default combat formation (frontline/backline).')
@@ -928,4 +1046,3 @@ class CombatCog(commands.Cog):
 
 async def setup(bot: commands.Bot):
     await bot.add_cog(CombatCog(bot))
-

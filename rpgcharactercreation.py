@@ -147,7 +147,7 @@ class EquipmentSelectView(discord.ui.View):
         elif char_class == "Mage":
             self.add_item(EquipmentButton("Option: Robe & Staff", {
                 "head": "None",
-                "chest": "Cloth Robe",
+                "chest": "Cloth Robes",
                 "hands": "None",
                 "legs": "Cloth Pants",
                 "feet": "Wooden Sandals",
