@@ -15,6 +15,16 @@ INITIAL_STATS = {
 }
 MAX_POINTS = 10
 
+# Skills organized by stat
+SKILLS_BY_STAT = {
+    "Strength": ["Athletics", "Intimidation", "Labor"],
+    "Dexterity": ["Sleight of Hand", "Stealth", "Acrobatics"], 
+    "Intelligence": ["History", "Arcana", "Investigation", "Religion"],
+    "Willpower": ["Insight", "Perception", "Medicine"],
+    "Fortitude": ["Survival", "Endurance", "Constitution"],
+    "Charisma": ["Persuasion", "Deception", "Performance"]
+}
+
 # ------------------
 # Gender, Class, Race & Name Selection Components
 # ------------------
@@ -266,12 +276,201 @@ class ConfirmButton(discord.ui.Button):
         view: StatDistributionView = self.view
         for child in view.children:
             child.disabled = True
+        
+        # Store stats in root view and proceed to skill selection
+        view.root_view.character["stats"] = view.stats
+        
+        # Use followup instead of response since we already responded with edit_message
         await interaction.response.edit_message(embed=view.create_embed(), view=view)
+        
+        # Go to skill selection
+        skill_view = SkillSelectionView(root_view=view.root_view)
+        await interaction.followup.send(embed=skill_view.create_embed(), view=skill_view, ephemeral=True)
+        view.stop()
+
+# ------------------
+# Skill Selection
+# ------------------
+class SkillSelectionView(discord.ui.View):
+    def __init__(self, *, root_view: discord.ui.View):
+        super().__init__(timeout=300)
+        self.root_view = root_view
+        self.selected_skills = []
+        self.max_skills = 4  # Players can choose 4 skills
+        self.current_page = 0
+        self.skills_per_page = 3  # Show 3 stats per page to avoid hitting 25 component limit
+        
+        self.update_page()
+
+    def get_stats_for_page(self, page: int):
+        """Get the stats to show on the current page"""
+        all_stats = list(SKILLS_BY_STAT.keys())
+        start_idx = page * self.skills_per_page
+        end_idx = start_idx + self.skills_per_page
+        return all_stats[start_idx:end_idx]
+
+    def update_page(self):
+        """Update the view for the current page"""
+        self.clear_items()
+        
+        stats_on_page = self.get_stats_for_page(self.current_page)
+        
+        # Add skill dropdowns for current page
+        for stat_name in stats_on_page:
+            skills = SKILLS_BY_STAT[stat_name]
+            self.add_item(SkillSelect(stat_name, skills))
+        
+        # Add navigation buttons if needed
+        all_stats = list(SKILLS_BY_STAT.keys())
+        total_pages = (len(all_stats) + self.skills_per_page - 1) // self.skills_per_page
+        
+        if total_pages > 1:
+            if self.current_page > 0:
+                self.add_item(PreviousPageButton())
+            if self.current_page < total_pages - 1:
+                self.add_item(NextPageButton())
+        
+        # Add finish button
+        self.add_item(FinishSkillsButton())
+
+    def create_embed(self):
+        embed = discord.Embed(
+            title="Skill Selection",
+            description=f"Choose up to {self.max_skills} skills that your character is trained in.\nTrained skills give +2 bonus to rolls.",
+            color=discord.Color.green()
+        )
+        
+        # Show skills for current page only
+        stats_on_page = self.get_stats_for_page(self.current_page)
+        for stat_name in stats_on_page:
+            skills = SKILLS_BY_STAT[stat_name]
+            skill_list = ", ".join(skills)
+            embed.add_field(name=f"{stat_name} Skills", value=skill_list, inline=False)
+        
+        # Show selected skills
+        if self.selected_skills:
+            selected_text = ", ".join(self.selected_skills)
+        else:
+            selected_text = "None selected"
+        
+        embed.add_field(
+            name=f"Selected Skills ({len(self.selected_skills)}/{self.max_skills})",
+            value=selected_text,
+            inline=False
+        )
+        
+        # Show page info if multiple pages
+        all_stats = list(SKILLS_BY_STAT.keys())
+        total_pages = (len(all_stats) + self.skills_per_page - 1) // self.skills_per_page
+        if total_pages > 1:
+            embed.set_footer(text=f"Page {self.current_page + 1}/{total_pages} - Select skills from dropdowns, then click 'Finish' when done.")
+        else:
+            embed.set_footer(text="Select skills from the dropdowns above, then click 'Finish' when done.")
+        
+        return embed
+
+    async def update_message(self, interaction: discord.Interaction):
+        self.update_page()
+        new_embed = self.create_embed()
+        try:
+            await interaction.response.edit_message(embed=new_embed, view=self)
+        except Exception:
+            await interaction.message.edit(embed=new_embed, view=self)
+
+class PreviousPageButton(discord.ui.Button):
+    def __init__(self):
+        super().__init__(label="◀ Previous", style=discord.ButtonStyle.secondary)
+
+    async def callback(self, interaction: discord.Interaction):
+        view: SkillSelectionView = self.view
+        if view.current_page > 0:
+            view.current_page -= 1
+            await view.update_message(interaction)
+
+class NextPageButton(discord.ui.Button):
+    def __init__(self):
+        super().__init__(label="Next ▶", style=discord.ButtonStyle.secondary)
+
+    async def callback(self, interaction: discord.Interaction):
+        view: SkillSelectionView = self.view
+        all_stats = list(SKILLS_BY_STAT.keys())
+        total_pages = (len(all_stats) + view.skills_per_page - 1) // view.skills_per_page
+        if view.current_page < total_pages - 1:
+            view.current_page += 1
+            await view.update_message(interaction)
+
+class SkillSelect(discord.ui.Select):
+    def __init__(self, stat_name: str, skills: list):
+        options = []
+        for skill in skills:
+            options.append(discord.SelectOption(
+                label=skill,
+                description=f"{stat_name} skill",
+                value=skill
+            ))
+        
+        super().__init__(
+            placeholder=f"Choose {stat_name} skill...",
+            options=options,
+            min_values=0,
+            max_values=1
+        )
+        self.stat_name = stat_name
+
+    async def callback(self, interaction: discord.Interaction):
+        view: SkillSelectionView = self.view
+        
+        if not self.values:
+            return
+            
+        selected_skill = self.values[0]
+        
+        # Check if already selected
+        if selected_skill in view.selected_skills:
+            await interaction.response.send_message(f"You already selected {selected_skill}!", ephemeral=True)
+            return
+            
+        # Check if at max skills
+        if len(view.selected_skills) >= view.max_skills:
+            await interaction.response.send_message(f"You can only select {view.max_skills} skills!", ephemeral=True)
+            return
+            
+        # Add the skill
+        view.selected_skills.append(selected_skill)
+        await view.update_message(interaction)
+
+class FinishSkillsButton(discord.ui.Button):
+    def __init__(self):
+        super().__init__(label="Finish Skills", style=discord.ButtonStyle.success)
+
+    async def callback(self, interaction: discord.Interaction):
+        view: SkillSelectionView = self.view
+        
+        # Require at least 1 skill
+        if len(view.selected_skills) < 1:
+            await interaction.response.send_message("Please select at least 1 skill!", ephemeral=True)
+            return
+            
+        # Store skills in root view
+        view.root_view.character["trained_skills"] = view.selected_skills
+        
+        # Create skill bonuses dict
+        skill_bonuses = {}
+        for skill in view.selected_skills:
+            skill_bonuses[skill] = 2  # +2 bonus for trained skills
+            
+        view.root_view.character["skill_bonuses"] = skill_bonuses
+        
+        # Finalize character creation
+        await self.finalize_character(interaction, view)
+        view.stop()
+
+    async def finalize_character(self, interaction: discord.Interaction, view):
         user_id = str(interaction.user.id)
         data = rpg_load_data()
-        calculate_starting_hp_mana_stamina(user_id)
+        
         character_data = {
-            "stats": view.stats,
+            "stats": view.root_view.character.get("stats"),
             "level": 1,
             "experience": 0,
             "armor": 0,
@@ -281,17 +480,30 @@ class ConfirmButton(discord.ui.Button):
             "race": view.root_view.character.get("race"),
             "name": view.root_view.character.get("name"),
             "equipment": view.root_view.character.get("equipment"),
+            "action_skills": view.root_view.character.get("action_skills", []),
+            "sideaction_skills": view.root_view.character.get("sideaction_skills", []),
+            "trained_skills": view.root_view.character.get("trained_skills", []),
+            "skill_bonuses": view.root_view.character.get("skill_bonuses", {}),
             "inventory": {},
             "conditions:": {},
             "gold": 10
         }
+        
         data[user_id] = character_data
         rpg_save_data(data)
         calculate_starting_hp_mana_stamina(user_id)
         update_equipment_bonuses_for_user(user_id)
         full_heal(user_id)
-        await interaction.followup.send("Your character has been saved!", ephemeral=True)
-        view.stop()
+        
+        # Show completion message
+        skills_text = ", ".join(view.selected_skills)
+        await interaction.response.send_message(
+            f"🎉 Character creation complete!\n\n"
+            f"**{view.root_view.character['name']}** the {view.root_view.character['race']} {view.root_view.character['class']}\n"
+            f"**Trained Skills:** {skills_text}\n\n"
+            f"Your character has been saved!",
+            ephemeral=True
+        )
 
 # ------------------
 # Character Creation View
@@ -315,12 +527,21 @@ class CharacterCreationView(discord.ui.View):
         name = self.character.get("name", "Not chosen")
         equipment = self.character.get("equipment", "Not chosen")
         stats = self.character.get("stats", "Not chosen")
+        skills = self.character.get("trained_skills", "Not chosen")
+        
         embed.add_field(name="Gender", value=gender, inline=True)
         embed.add_field(name="Class", value=char_class, inline=True)
         embed.add_field(name="Race", value=race, inline=True)
         embed.add_field(name="Name", value=name, inline=True)
         embed.add_field(name="Equipment", value=equipment, inline=True)
         embed.add_field(name="Stats", value=stats, inline=True)
+        
+        if isinstance(skills, list) and skills:
+            skills_text = ", ".join(skills)
+        else:
+            skills_text = str(skills)
+        embed.add_field(name="Skills", value=skills_text, inline=True)
+        
         return embed
 
     async def update_embed(self, interaction: discord.Interaction, final: bool = False):

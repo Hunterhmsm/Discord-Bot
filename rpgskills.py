@@ -1,14 +1,13 @@
 import random
-from rpgutils import rpg_load_data, apply_damage_modifiers, rpg_save_data
+from rpgutils import rpg_load_data, apply_damage_modifiers, rpg_save_data, DAZED_PENALTY
 from globals import RPG_ITEMS_FILE
 import json
 
 
 
-
 # ABILITIES WARRIOR
 #
-#
+# TIER 1
 #
 
 #rend that applies bleeding for two turns
@@ -125,7 +124,7 @@ def cleave(scene, attacker_uid, target_uid=None):
     attacker_data = chars.get(attacker_uid) or scene.enemies_data.get(attacker_uid, {})
     attacker_name = attacker_data.get("name", attacker_uid)
 
-    # ——— Player-only restrictions ———
+    # Player-only restrictions
     if is_player:
         # Stamina cost
         stamina = attacker_data.get("stamina", 0)
@@ -158,7 +157,7 @@ def cleave(scene, attacker_uid, target_uid=None):
         rpg_save_data(chars)
 
     else:
-        # Enemy path - simplified check
+        # Enemy path simplified check
         if attacker_data.get("type") == "slashing":
             weapon_data = {"type": "slashing"}
         else:
@@ -188,7 +187,7 @@ def cleave(scene, attacker_uid, target_uid=None):
             bonus = attacker_data.get("attack_bonus", 0)
             
         if "dazed" in scene.conditions.get(attacker_uid, {}):
-            bonus -= 2
+            bonus -= DAZED_PENALTY
 
         roll = random.randint(1, 10)
         total = roll + bonus
@@ -217,6 +216,113 @@ def cleave(scene, attacker_uid, target_uid=None):
 
     return "\n".join(results)
 
+
+#rend that applies bleeding for two turns
+def power_strike(scene, attacker_uid, target_uid):
+    from rpgutils import rpg_load_data, rpg_save_data  # ensure these are imported
+
+    chars = rpg_load_data()
+    is_player = attacker_uid in chars
+    attacker_data = scene.enemies_data.get(attacker_uid) or chars.get(attacker_uid)
+    target_data   = scene.enemies_data.get(target_uid) or chars.get(target_uid)
+
+    attacker_name = attacker_data.get('name', attacker_uid)
+    target_name   = target_data.get('name', target_uid)
+
+    # Player-only restrictions
+    if is_player:
+        # Stamina cost
+        stamina = attacker_data.get("current_stamina", 0)
+        if stamina < 4:
+            return f"{attacker_name} doesn't have enough stamina to use Power Strike! (4 required)"
+        
+        # Melee weapon requirement
+        eq = attacker_data.get("equipment", {})
+        main = eq.get("mainhand", "").lower().replace(" ", "_")
+
+        items = json.load(open(RPG_ITEMS_FILE))
+        weapons = items.get("weapons", {})
+        main_data = weapons.get(main, {})
+
+        # Check for melee weapon
+        if main_data.get("range") != "melee":
+            return f"{attacker_name} needs a melee weapon to use Power Strike!"
+
+        # Deduct stamina
+        attacker_data["current_stamina"] = stamina - 4
+        chars[attacker_uid] = attacker_data
+        rpg_save_data(chars)
+
+        # Calculate attack bonus
+        raw_stat = main_data.get('stat', 'strength')
+        stat_key = raw_stat.capitalize()
+        stat_value = attacker_data.get('stats', {}).get(stat_key, 0)
+        bonus = stat_value // 2
+        if 'dazed' in scene.conditions.get(attacker_uid, {}):
+            bonus -= DAZED_PENALTY
+
+        # Roll attack
+        roll = random.randint(1, 10)
+        total = roll + bonus
+        armor = target_data.get('armor', 10)
+        
+        result = f"{attacker_name} power strikes {target_name} ({roll}+{bonus}={total} vs AC {armor}). "
+
+        # Check if attack hits
+        if total >= armor:
+            # Double weapon damage
+            dmg_min = main_data.get('damage', {}).get('min', 1) * 2
+            dmg_max = main_data.get('damage', {}).get('max', 1) * 2
+            dmg = random.randint(dmg_min, dmg_max)
+            dmg_type = main_data.get('type', 'bludgeoning')
+            
+            final_dmg = apply_damage_modifiers(scene, target_uid, dmg, dmg_type)
+            scene.hp_map[target_uid] -= final_dmg
+            scene.hp_map[target_uid] = max(scene.hp_map[target_uid], 0)
+            
+            # Apply dazed condition (3 turns)
+            scene.conditions.setdefault(target_uid, {})["dazed"] = 3
+            scene._last_attacker = attacker_name
+            
+            result += f"Hit! {final_dmg} {dmg_type} damage and dazed for 3 turns!"
+        else:
+            result += "Miss!"
+
+    else:
+        # Enemy version simplified
+        bonus = attacker_data.get("attack_bonus", 0)
+        if 'dazed' in scene.conditions.get(attacker_uid, {}):
+            bonus -= DAZED_PENALTY
+
+        roll = random.randint(1, 10)
+        total = roll + bonus
+        armor = target_data.get('armor', 10)
+        
+        result = f"{attacker_name} power strikes {target_name} ({roll}+{bonus}={total} vs AC {armor}). "
+
+        if total >= armor:
+            # Double enemy damage
+            dmg_min = attacker_data.get("damage_min", 1) * 2
+            dmg_max = attacker_data.get("damage_max", 4) * 2
+            dmg = random.randint(dmg_min, dmg_max)
+            dmg_type = attacker_data.get("type", "bludgeoning")
+            
+            final_dmg = apply_damage_modifiers(scene, target_uid, dmg, dmg_type)
+            scene.hp_map[target_uid] -= final_dmg
+            scene.hp_map[target_uid] = max(scene.hp_map[target_uid], 0)
+            
+            # Apply dazed condition (3 turns)
+            scene.conditions.setdefault(target_uid, {})["dazed"] = 3
+            scene._last_attacker = attacker_name
+            
+            result += f"Hit! {final_dmg} {dmg_type} damage and dazed for 3 turns!"
+        else:
+            result += "Miss!"
+
+    # Apply cooldown
+    scene.cooldowns.setdefault(attacker_uid, {})["power_strike"] = 5  # 5-turn cooldown
+
+    return result
 
 # CONDITION TICKERS
 # #

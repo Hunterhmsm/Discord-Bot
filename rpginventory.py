@@ -3,7 +3,7 @@ from discord import app_commands, Interaction
 from discord.ext import commands
 from typing import Optional
 from globals import RPG_INVENTORY_FILE, GUILD_ID
-from rpgutils import rpg_load_data, rpg_save_data, load_rpg_items, update_equipment_bonuses_for_user
+from rpgutils import rpg_load_data, rpg_save_data, load_rpg_items, update_equipment_bonuses_for_user, is_user_in_combat
 
 #helper
 def get_item_definition(item_name: str) -> dict:
@@ -453,6 +453,8 @@ class RPGInventory(commands.Cog):
     @app_commands.command(name="inventory", description="View your equipped items, inventory, and gold.")
     @app_commands.describe(user="Optional: The user whose inventory you want to see (defaults to yourself)")
     async def inventory(self, interaction: discord.Interaction, user: discord.Member = None):
+        if is_user_in_combat(str(user_id)):
+            return await interaction.response.send_message("You cannot access your inventory in combat.", ephemeral=True)
         target = user or interaction.user
         data = rpg_load_data()
         user_id = str(target.id)

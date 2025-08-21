@@ -10,7 +10,7 @@ import importlib
 from rpgai import resolve_ai
 
 from globals import GUILD_ID, COMBATS_FILE, ENEMIES_FILE, RPG_ITEMS_FILE
-from rpgutils import rpg_load_data, rpg_save_data, add_to_graveyard, apply_damage_modifiers
+from rpgutils import rpg_load_data, rpg_save_data, add_to_graveyard, apply_damage_modifiers, DAZED_PENALTY
 from rpgparties import load_parties
 import rpgskills
 import asyncio
@@ -310,16 +310,33 @@ class CombatView(View):
         """Run all consecutive enemy turns before returning control to the player."""
 
         scene = combat_scenes[self.combat_id]
+        max_iterations = 20  # Safety limit to prevent infinite loops
 
         # Run enemy turns in sequence
+        iteration_count = 0
         while scene.turn_order and not scene.turn_order[scene.current_turn_index] in rpg_load_data():
             uid = scene.turn_order[scene.current_turn_index]
+            
+            # Safety check to prevent infinite loops
+            iteration_count += 1
+            if iteration_count > max_iterations:
+                print(f"DEBUG: Breaking auto-enemy loop after {max_iterations} iterations")
+                break
+            
+            # Tick effects first (this handles conditions)
             tick_effects(scene, lambda msg: scene.log.append(msg))
             await message.edit(embed=build_embed(scene), view=self)
 
             outcome = resolve_ai(scene, uid)
             if not outcome:
-                break
+                # AI couldn't act, advance turn manually to prevent infinite loop
+                scene.current_turn_index = (scene.current_turn_index + 1) % len(scene.turn_order)
+                scene.actions_used.setdefault(
+                    scene.turn_order[scene.current_turn_index],
+                    {"action": False, "side_action": False}
+                )
+                save_combats()
+                continue
 
             result, _ = outcome
             save_combats()
@@ -355,9 +372,19 @@ class CombatView(View):
         if not scene or not scene.turn_order:
             await interaction.response.send_message('No active combat.', ephemeral=True)
             return False
+        
         current = scene.turn_order[scene.current_turn_index]
-        if current not in rpg_load_data() and str(interaction.user.id) != current:
-            await interaction.response.send_message("It's not your turn.", ephemeral=True)
+        
+        # Check if it's a player's turn (not an enemy)
+        if current not in rpg_load_data():
+            await interaction.response.send_message("It's not a player's turn.", ephemeral=True)
+            return False
+        
+        # Check if the interacting user owns the current character
+        if str(interaction.user.id) != current:
+            chars = rpg_load_data()
+            char_name = chars.get(current, {}).get('name', 'Unknown')
+            await interaction.response.send_message(f"It's {char_name}'s turn, not yours.", ephemeral=True)
             return False
         
         # Refresh UI components with the current user's data
@@ -431,7 +458,7 @@ class CombatView(View):
             stat_value = char.get('stats', {}).get(stat_key, 0)
             bonus      = stat_value // 2
             if 'dazed' in scene.conditions.get(uid, {}):
-                bonus -= 2
+                bonus -= DAZED_PENALTY
             # 4) Roll attack
             roll  = random.randint(1, 10)
             total = roll + bonus
@@ -499,7 +526,20 @@ class CombatView(View):
                 # final embed + message
                 print(f"DEBUG: Editing message and cleaning up...")
                 await interaction.message.edit(embed=build_embed(scene), view=None)
-                msg = f"Combat ended! +{xp_each} XP" if players_alive else "Your party has fallen…"
+                
+                # Build detailed XP breakdown message
+                if players_alive:
+                    chars = rpg_load_data()
+                    xp_breakdown = []
+                    for p in players:
+                        char_name = chars.get(p, {}).get('name', f'<@{p}>')
+                        xp_breakdown.append(f"• {char_name}: +{xp_each} XP")
+                    
+                    breakdown_text = "\n".join(xp_breakdown)
+                    msg = f"Combat ended! Victory!\n\n**XP Earned:**\n{breakdown_text}"
+                else:
+                    msg = "Your party has fallen…"
+                    
                 await interaction.channel.send(msg)
                 
                 # cleanup
@@ -564,14 +604,34 @@ class CombatView(View):
 
 
         # ─── AUTOMATED ENEMY TURNS via centralized AI ───
+        max_iterations = 20  # Safety limit to prevent infinite loops
+        iteration_count = 0
+        
         while True:
             next_uid = scene.turn_order[scene.current_turn_index]
             if next_uid in rpg_load_data():  # If it's a player, stop
                 break
+                
+            # Safety check to prevent infinite loops
+            iteration_count += 1
+            if iteration_count > max_iterations:
+                print(f"DEBUG: Breaking enemy AI loop after {max_iterations} iterations")
+                break
+
+            # Tick effects
+            tick_effects(scene, lambda msg: scene.log.append(msg))
 
             outcome = resolve_ai(scene, next_uid)
             if not outcome:
-                break
+                # AI couldn't act, advance turn manually to prevent infinite loop
+                scene.current_turn_index = (scene.current_turn_index + 1) % len(scene.turn_order)
+                scene.actions_used.setdefault(
+                    scene.turn_order[scene.current_turn_index],
+                    {"action": False, "side_action": False}
+                )
+                save_combats()
+                await interaction.message.edit(embed=build_embed(scene), view=self)
+                continue
 
             result, target = outcome
             save_combats()
@@ -629,7 +689,14 @@ class CombatView(View):
 
         # outcome message
         if xp_win:
-            await interaction.channel.send(f"Combat ended! +{xp_each} XP")
+            chars = rpg_load_data()
+            xp_breakdown = []
+            for p in players:
+                char_name = chars.get(p, {}).get('name', f'<@{p}>')
+                xp_breakdown.append(f"• {char_name}: +{xp_each} XP")
+            
+            breakdown_text = "\n".join(xp_breakdown)
+            await interaction.channel.send(f"Combat ended! Victory!\n\n**XP Earned:**\n{breakdown_text}")
         else:
             await interaction.channel.send("Your party has fallen…")
 
@@ -663,7 +730,14 @@ class CombatView(View):
         await message.edit(embed=build_embed(scene), view=None)
         # final text
         if xp_win:
-            await message.channel.send(f"Combat ended! +{xp_each} XP")
+            chars = rpg_load_data()
+            xp_breakdown = []
+            for p in players:
+                char_name = chars.get(p, {}).get('name', f'<@{p}>')
+                xp_breakdown.append(f"• {char_name}: +{xp_each} XP")
+            
+            breakdown_text = "\n".join(xp_breakdown)
+            await message.channel.send(f"Combat ended! Victory!\n\n**XP Earned:**\n{breakdown_text}")
         else:
             await message.channel.send("Your party has fallen…")
 
@@ -973,7 +1047,19 @@ def build_embed(scene):
         inline=False
     )
     if scene.log:
-        log_text = "\n".join(scene.log[-10:])  # Show last 10 lines
+        # Limit to last 10 actions and ensure under 1024 characters
+        recent_log = scene.log[-10:]
+        log_text = "\n".join(recent_log)
+        
+        # If still too long, keep removing oldest entries until it fits
+        while len(log_text) > 1000 and recent_log:  # Leave buffer for "..." 
+            recent_log.pop(0)
+            log_text = "\n".join(recent_log)
+        
+        # If we had to truncate, add indicator
+        if len(scene.log) > len(recent_log):
+            log_text = "...\n" + log_text
+            
         embed.add_field(name="Recent Actions", value=log_text, inline=False)
     return embed
 

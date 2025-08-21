@@ -6,7 +6,7 @@ import os
 import datetime
 import asyncio
 from globals import RPG_PARTIES_FILE, GUILD_ID
-from rpgutils import rpg_load_data, rpg_save_data, is_user_in_combat
+from rpgutils import rpg_load_data, rpg_save_data, is_user_in_combat, SKILLS_BY_STAT
 
 #levels dictionary for easy access
 levels = {
@@ -117,16 +117,292 @@ class ConfirmButton(discord.ui.Button):
 
         equipment_bonus = user_data.get("equipment_bonus", {})
 
-
         base_stats = user_data.get("stats", {})
         for stat in base_stats:
             base_stats[stat] = view.stats.get(stat, base_stats.get(stat, 0)) + equipment_bonus.get(stat, 0)
         user_data["stats"] = base_stats
 
         rpg_save_data(data)
-        await interaction.followup.send("Your character has been updated!", ephemeral=True)
+        
+        # Proceed to skill improvement
+        skill_view = SkillImprovementView(user_id=user_id)
+        await interaction.followup.send(embed=skill_view.create_embed(), view=skill_view, ephemeral=True)
         view.stop()
 
+# ------------------
+# Skill Improvement System
+# ------------------
+class SkillImprovementView(discord.ui.View):
+    def __init__(self, *, user_id: str):
+        super().__init__(timeout=300)
+        self.user_id = user_id
+        self.choice_made = False
+        
+        # Add buttons for the two options
+        self.add_item(LearnNewSkillButton())
+        self.add_item(ImproveExistingSkillButton())
+
+    def create_embed(self):
+        data = rpg_load_data()
+        user_data = data.get(self.user_id, {})
+        character_name = user_data.get("name", "Unknown")
+        trained_skills = user_data.get("trained_skills", [])
+        
+        embed = discord.Embed(
+            title="Skill Improvement",
+            description=f"**{character_name}** gained a level! Choose how to improve your skills:",
+            color=discord.Color.gold()
+        )
+        
+        embed.add_field(
+            name="Option 1: Learn New Skill",
+            value="Gain training in a new skill (+2 bonus)",
+            inline=False
+        )
+        
+        embed.add_field(
+            name="Option 2: Improve Existing Skill", 
+            value="Increase an existing skill bonus by +2 (up to +6 max)",
+            inline=False
+        )
+        
+        if trained_skills:
+            current_skills = []
+            skill_bonuses = user_data.get("skill_bonuses", {})
+            for skill in trained_skills:
+                bonus = skill_bonuses.get(skill, 0)
+                current_skills.append(f"{skill} (+{bonus})")
+            
+            embed.add_field(
+                name="Current Trained Skills",
+                value="\n".join(current_skills),
+                inline=False
+            )
+        
+        embed.set_footer(text="Choose an option above to continue.")
+        return embed
+
+class LearnNewSkillButton(discord.ui.Button):
+    def __init__(self):
+        super().__init__(label="Learn New Skill", style=discord.ButtonStyle.success, emoji="📚")
+
+    async def callback(self, interaction: discord.Interaction):
+        view: SkillImprovementView = self.view
+        if view.choice_made:
+            return
+        
+        view.choice_made = True
+        new_skill_view = NewSkillSelectionView(user_id=view.user_id)
+        await interaction.response.send_message(embed=new_skill_view.create_embed(), view=new_skill_view, ephemeral=True)
+        view.stop()
+
+class ImproveExistingSkillButton(discord.ui.Button):
+    def __init__(self):
+        super().__init__(label="Improve Existing Skill", style=discord.ButtonStyle.primary, emoji="⬆️")
+
+    async def callback(self, interaction: discord.Interaction):
+        view: SkillImprovementView = self.view
+        if view.choice_made:
+            return
+            
+        view.choice_made = True
+        data = rpg_load_data()
+        user_data = data.get(view.user_id, {})
+        trained_skills = user_data.get("trained_skills", [])
+        
+        if not trained_skills:
+            await interaction.response.send_message("You don't have any trained skills to improve!", ephemeral=True)
+            return
+            
+        improve_view = ImproveSkillSelectionView(user_id=view.user_id, trained_skills=trained_skills)
+        await interaction.response.send_message(embed=improve_view.create_embed(), view=improve_view, ephemeral=True)
+        view.stop()
+
+# ------------------
+# New Skill Selection
+# ------------------
+class NewSkillSelectionView(discord.ui.View):
+    def __init__(self, *, user_id: str):
+        super().__init__(timeout=300)
+        self.user_id = user_id
+        
+        data = rpg_load_data()
+        user_data = data.get(user_id, {})
+        trained_skills = user_data.get("trained_skills", [])
+        
+        # Add dropdowns for each stat's skills
+        for stat_name, skills in SKILLS_BY_STAT.items():
+            # Only show skills the user doesn't already have
+            available_skills = [skill for skill in skills if skill not in trained_skills]
+            if available_skills:
+                self.add_item(NewSkillSelect(stat_name, available_skills))
+
+    def create_embed(self):
+        embed = discord.Embed(
+            title="Learn New Skill",
+            description="Choose a new skill to learn. You'll gain +2 bonus to rolls with this skill.",
+            color=discord.Color.green()
+        )
+        
+        data = rpg_load_data()
+        user_data = data.get(self.user_id, {})
+        trained_skills = user_data.get("trained_skills", [])
+        
+        for stat_name, skills in SKILLS_BY_STAT.items():
+            available_skills = [skill for skill in skills if skill not in trained_skills]
+            if available_skills:
+                skill_list = ", ".join(available_skills)
+                embed.add_field(name=f"{stat_name} Skills", value=skill_list, inline=False)
+        
+        embed.set_footer(text="Select a skill from the dropdowns above.")
+        return embed
+
+class NewSkillSelect(discord.ui.Select):
+    def __init__(self, stat_name: str, available_skills: list):
+        options = []
+        for skill in available_skills:
+            options.append(discord.SelectOption(
+                label=skill,
+                description=f"{stat_name} skill - Gain +2 bonus",
+                value=skill
+            ))
+        
+        super().__init__(
+            placeholder=f"Learn {stat_name} skill...",
+            options=options,
+            min_values=1,
+            max_values=1
+        )
+        self.stat_name = stat_name
+
+    async def callback(self, interaction: discord.Interaction):
+        view: NewSkillSelectionView = self.view
+        selected_skill = self.values[0]
+        
+        data = rpg_load_data()
+        user_data = data.get(view.user_id, {})
+        
+        # Add the new skill
+        trained_skills = user_data.get("trained_skills", [])
+        skill_bonuses = user_data.get("skill_bonuses", {})
+        
+        trained_skills.append(selected_skill)
+        skill_bonuses[selected_skill] = 2
+        
+        user_data["trained_skills"] = trained_skills
+        user_data["skill_bonuses"] = skill_bonuses
+        
+        data[view.user_id] = user_data
+        rpg_save_data(data)
+        
+        await interaction.response.send_message(
+            f"🎉 **Level up complete!**\n"
+            f"You learned **{selected_skill}** (+2 bonus)!\n"
+            f"Your character has been updated.",
+            ephemeral=True
+        )
+        view.stop()
+
+# ------------------
+# Improve Existing Skill
+# ------------------
+class ImproveSkillSelectionView(discord.ui.View):
+    def __init__(self, *, user_id: str, trained_skills: list):
+        super().__init__(timeout=300)
+        self.user_id = user_id
+        
+        data = rpg_load_data()
+        user_data = data.get(user_id, {})
+        skill_bonuses = user_data.get("skill_bonuses", {})
+        
+        # Only show skills that can be improved (less than +6)
+        improvable_skills = [skill for skill in trained_skills if skill_bonuses.get(skill, 0) < 6]
+        
+        if improvable_skills:
+            self.add_item(ImproveSkillSelect(improvable_skills, skill_bonuses))
+
+    def create_embed(self):
+        data = rpg_load_data()
+        user_data = data.get(self.user_id, {})
+        skill_bonuses = user_data.get("skill_bonuses", {})
+        trained_skills = user_data.get("trained_skills", [])
+        
+        embed = discord.Embed(
+            title="Improve Existing Skill",
+            description="Choose a skill to improve by +2 (maximum +6).",
+            color=discord.Color.blue()
+        )
+        
+        improvable_skills = []
+        maxed_skills = []
+        
+        for skill in trained_skills:
+            bonus = skill_bonuses.get(skill, 0)
+            if bonus < 6:
+                improvable_skills.append(f"{skill} (+{bonus} → +{bonus + 2})")
+            else:
+                maxed_skills.append(f"{skill} (+{bonus}) - MAX")
+        
+        if improvable_skills:
+            embed.add_field(
+                name="Can Improve",
+                value="\n".join(improvable_skills),
+                inline=False
+            )
+        
+        if maxed_skills:
+            embed.add_field(
+                name="Already Maxed",
+                value="\n".join(maxed_skills),
+                inline=False
+            )
+        
+        embed.set_footer(text="Select a skill to improve from the dropdown.")
+        return embed
+
+class ImproveSkillSelect(discord.ui.Select):
+    def __init__(self, improvable_skills: list, skill_bonuses: dict):
+        options = []
+        for skill in improvable_skills:
+            current_bonus = skill_bonuses.get(skill, 0)
+            new_bonus = current_bonus + 2
+            options.append(discord.SelectOption(
+                label=skill,
+                description=f"Improve from +{current_bonus} to +{new_bonus}",
+                value=skill
+            ))
+        
+        super().__init__(
+            placeholder="Choose skill to improve...",
+            options=options,
+            min_values=1,
+            max_values=1
+        )
+
+    async def callback(self, interaction: discord.Interaction):
+        view: ImproveSkillSelectionView = self.view
+        selected_skill = self.values[0]
+        
+        data = rpg_load_data()
+        user_data = data.get(view.user_id, {})
+        skill_bonuses = user_data.get("skill_bonuses", {})
+        
+        # Improve the skill
+        old_bonus = skill_bonuses.get(selected_skill, 0)
+        new_bonus = min(old_bonus + 2, 6)  # Cap at +6
+        skill_bonuses[selected_skill] = new_bonus
+        
+        user_data["skill_bonuses"] = skill_bonuses
+        data[view.user_id] = user_data
+        rpg_save_data(data)
+        
+        await interaction.response.send_message(
+            f"🎉 **Level up complete!**\n"
+            f"**{selected_skill}** improved from +{old_bonus} to +{new_bonus}!\n"
+            f"Your character has been updated.",
+            ephemeral=True
+        )
+        view.stop()
 
 class LevelCog(commands.Cog):
     def __init__(self, bot: commands.Bot):

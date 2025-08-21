@@ -1,8 +1,22 @@
 from globals import DATA_FILE, RPG_INVENTORY_FILE, RPG_ITEMS_FILE, GRAVEYARD_FILE
 import os
 import json
-from typing import Optional
+import random
+from typing import Optional, Tuple
 import datetime
+
+# Global constants for combat conditions
+DAZED_PENALTY = 3 
+
+# Skills organized by stat for skill checks
+SKILLS_BY_STAT = {
+    "Strength": ["Athletics", "Intimidation", "Labor"],
+    "Dexterity": ["Sleight of Hand", "Stealth", "Acrobatics"], 
+    "Intelligence": ["History", "Arcana", "Investigation", "Religion"],
+    "Willpower": ["Insight", "Perception", "Medicine"],
+    "Fortitude": ["Survival", "Endurance", "Constitution"],
+    "Charisma": ["Persuasion", "Deception", "Performance"]
+}
 
 def rpg_load_data():
     if not os.path.exists(DATA_FILE):
@@ -25,6 +39,90 @@ def load_rpg_items():
     except Exception as e:
         print(f"Error loading items data: {e}")
         return {}
+
+def get_skill_stat(skill: str) -> str:
+    """
+    Returns which stat a skill is based on.
+    
+    Args:
+        skill: The skill name (e.g., "Athletics")
+        
+    Returns:
+        The stat name (e.g., "Strength") or "Strength" as default
+    """
+    for stat, skills in SKILLS_BY_STAT.items():
+        if skill in skills:
+            return stat
+    return "Strength"  # Default fallback
+
+def make_skill_check(user_id: str, skill: str, difficulty: int) -> Tuple[bool, int, dict]:
+    """
+    Make a skill check for a character.
+    
+    Args:
+        user_id: The character's user ID
+        skill: The skill to check (e.g., "Athletics")
+        difficulty: The target difficulty class (DC)
+        
+    Returns:
+        Tuple of (success: bool, total_roll: int, breakdown: dict)
+        breakdown contains: roll, stat_bonus, training_bonus, total
+    """
+    char = rpg_load_data().get(user_id)
+    if not char:
+        return False, 0, {"error": "Character not found"}
+    
+    # Get the stat this skill is based on
+    stat_name = get_skill_stat(skill)
+    stat_value = char.get("stats", {}).get(stat_name, 0)
+    stat_bonus = stat_value // 2
+    
+    # Get training bonus (+2 if trained, 0 if not)
+    training_bonus = char.get("skill_bonuses", {}).get(skill, 0)
+    
+    # Roll 1d10
+    roll = random.randint(1, 10)
+    total = roll + stat_bonus + training_bonus
+    
+    # Check for success
+    success = total >= difficulty
+    
+    breakdown = {
+        "roll": roll,
+        "stat_bonus": stat_bonus,
+        "training_bonus": training_bonus,
+        "total": total,
+        "difficulty": difficulty,
+        "stat_used": stat_name
+    }
+    
+    return success, total, breakdown
+
+def format_skill_check_result(user_id: str, skill: str, success: bool, breakdown: dict) -> str:
+    """
+    Format a skill check result into a readable message.
+    
+    Args:
+        user_id: The character's user ID
+        skill: The skill that was checked
+        success: Whether the check succeeded
+        breakdown: The breakdown dict from make_skill_check
+        
+    Returns:
+        Formatted string describing the result
+    """
+    char = rpg_load_data().get(user_id, {})
+    name = char.get("name", f"<@{user_id}>")
+    
+    if "error" in breakdown:
+        return f"❌ {breakdown['error']}"
+    
+    result_emoji = "✅" if success else "❌"
+    result_text = "Success!" if success else "Failed!"
+    
+    return (f"{result_emoji} **{name}** {skill} check: "
+            f"{breakdown['roll']}+{breakdown['stat_bonus']}+{breakdown['training_bonus']}="
+            f"{breakdown['total']} vs DC {breakdown['difficulty']} - {result_text}")
 
 def calculate_equipment_bonuses(equipment: dict, items_data: dict) -> dict:
     """
@@ -267,14 +365,14 @@ def add_to_graveyard(user_id: str, enemy: Optional[str] = None):
                     party["leader"] = party["members"][0]  # Promote first member
                 else:
                     del parties[party_id]  # Disband if no one left
+    save_parties(parties)
 
             
-
 
 def is_user_in_combat(user_id: str) -> bool:
     """
     Check if a user is currently in any active combat.
-    Returns True if they’re in the friendly_frontline or friendly_backline
+    Returns True if they're in the friendly_frontline or friendly_backline
     of any CombatScene in combat_scenes, False otherwise.
     """
     from rpgcombat import combat_scenes
@@ -301,3 +399,45 @@ def apply_damage_modifiers(scene, target_uid, base_damage, dmg_type):
     elif dmg_type in vulner:
         return base_damage * 2
     return base_damage
+
+
+def make_saving_throw(scene, target_uid, save_type: str, dc: int) -> tuple[bool, str]:
+    """
+    Make a saving throw for a character.
+    
+    Args:
+        scene: Combat scene (for enemy data)
+        target_uid: Character making the save
+        save_type: Type of save ("fortitude", "willpower", etc.)
+        dc: Difficulty class to beat
+        
+    Returns:
+        tuple: (success: bool, result_message: str)
+    """
+    chars = rpg_load_data()
+    is_player = target_uid in chars
+    
+    if is_player:
+        char_data = chars[target_uid]
+        target_name = char_data.get('name', target_uid)
+        save_stat = char_data.get('stats', {}).get(save_type.capitalize(), 0)
+    else:
+        char_data = scene.enemies_data.get(target_uid, {})
+        target_name = char_data.get('name', target_uid)
+        save_stat = char_data.get(save_type.lower(), 0)
+    
+    # Calculate save bonus (stat / 2)
+    save_bonus = save_stat // 2
+    
+    # Roll 1d10
+    roll = random.randint(1, 10)
+    total = roll + save_bonus
+    
+    # Check success
+    success = total >= dc
+    
+    # Create result message
+    result_text = "Success!" if success else "Failed!"
+    message = f"{target_name} {save_type.capitalize()} save: {roll}+{save_bonus}={total} vs DC {dc} - {result_text}"
+    
+    return success, message
